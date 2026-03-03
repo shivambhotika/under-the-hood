@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block content %}
+<section>
+  <h1>Tool Deep Dive</h1>
+  <p class="subtitle">Select any tool to see where it's being used, how fast it's growing, and what it means.</p>
+
+  <form method="get" action="{{ url_for('tool_detail') }}" class="selector-form">
+    <label for="name">Choose a tool to explore</label>
+    <select name="name" id="name" onchange="this.form.submit()">
+      {% for t in tools %}
+      <option value="{{ t.canonical_name }}" {% if t.canonical_name == selected %}selected{% endif %}>
+        {{ t.display_name }} ({{ t.ecosystem }} · {{ t.category }}) — {{ "{:,}".format(t.total_repos|int) }} repos
+      </option>
+      {% endfor %}
+    </select>
+  </form>
+</section>
+
+<section class="tool-hero">
+  <h2>{{ tool.display_name }}</h2>
+  <p>{{ tool.description }}</p>
+  <div class="badge-row">
+    <span class="pill">{{ tool.ecosystem }} (ecosystem)</span>
+    <span class="pill">{{ tool.category }} (category)</span>
+    {% if tool.github_repo %}
+    <a class="pill link-pill" target="_blank" href="https://github.com/{{ tool.github_repo }}">GitHub repo (source project page)</a>
+    {% endif %}
+  </div>
+</section>
+
+<section class="cards three">
+  <article class="card">
+    <div class="label">Projects using it</div>
+    <div class="value">{{ "{:,}".format(tool.total_repos|int) }}</div>
+    <div class="sub">(public repos with 500+ stars that list this dependency)</div>
+  </article>
+  <article class="card">
+    <div class="label">New adopters (90 days)</div>
+    <div class="value">{{ "{:,}".format(tool.new_repos_90d|int) }}</div>
+    <div class="sub">(repos that started using it recently)</div>
+  </article>
+  <article class="card">
+    <div class="label">Still actively used</div>
+    <div class="value">{{ "{:,}".format(tool.active_repos|int) }}</div>
+    <div class="sub">({{ "%.0f"|format(active_pct) }}% of using repos were updated in the last 30 days)</div>
+  </article>
+</section>
+
+<section class="insight-box">
+  <div class="label">What this means</div>
+  <p>{{ insight }}</p>
+  <div class="small-note">Auto-generated from adoption data · Not editorial opinion</div>
+</section>
+
+<section class="columns two">
+  <div>
+    <h2>Which version are people running?</h2>
+    <p class="subtitle">If most users are on the latest version, the tool is usually well-maintained and trusted for upgrades (version distribution signal).</p>
+    {% if version_chart_html %}
+      {{ version_chart_html|safe }}
+    {% else %}
+      <div class="card">Version data not available for this tool.</div>
+    {% endif %}
+  </div>
+  <div>
+    <h2>Notable projects using this tool</h2>
+    <p class="subtitle">High-star repositories are usually well-maintained projects (quality signal from community attention).</p>
+    {% if tool.top_repos %}
+      {% for repo in tool.top_repos %}
+      <div class="repo-row">
+        <span>{{ repo.repo_full_name }}</span>
+        <span>★ {{ format_compact(repo.stars|int) }} <small>(GitHub stars)</small></span>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div class="card">No notable repositories found yet.</div>
+    {% endif %}
+  </div>
+</section>
+
+{% if trend_chart_html %}
+<section>
+  <h2>Adoption over time</h2>
+  <p class="subtitle">Each point is a daily snapshot of how many repos are using this tool (daily adoption count).</p>
+  {{ trend_chart_html|safe }}
+</section>
+{% endif %}
+{% endblock %}

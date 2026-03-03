@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="empty-state">
+  <div class="emoji">🔧</div>
+  <h2>No data yet</h2>
+  <p>Run the data pipeline first to collect adoption data from GitHub.</p>
+  <pre>python scripts/run_all.py</pre>
+</div>
+{% endblock %}

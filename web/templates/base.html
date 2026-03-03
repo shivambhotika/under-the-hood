@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ page_title }} · Under The Hood</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand">🔧 Under The Hood</div>
+      <div class="brand-sub">OSS Tool Intelligence</div>
+      <nav>
+        <a href="{{ url_for('home') }}" class="nav-link {% if request.path == '/' %}active{% endif %}">🏠 What's Happening Now</a>
+        <a href="{{ url_for('tool_detail') }}" class="nav-link {% if request.path == '/tool' %}active{% endif %}">🔍 Tool Deep Dive</a>
+        <a href="{{ url_for('category_view') }}" class="nav-link {% if request.path == '/category' %}active{% endif %}">📦 Category View</a>
+        <a href="{{ url_for('learn') }}" class="nav-link {% if request.path == '/learn' %}active{% endif %}">📖 How to Read This</a>
+      </nav>
+      <div class="sidebar-footer">
+        Data: GitHub API<br>
+        Updated: Daily<br>
+        Repos tracked: 500+ stars
+      </div>
+    </aside>
+
+    <main class="content">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</body>
+</html>

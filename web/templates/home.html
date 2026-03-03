@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block content %}
+<section>
+  <h1>What the open source world is actually building.</h1>
+  <p class="subtitle">Tracking <strong>{{ "{:,}".format(stats.total_tools) }} tools</strong> across <strong>{{ "{:,}".format(stats.total_repos) }} repositories</strong> (public projects with 500+ GitHub stars). Updated daily. No hype.</p>
+</section>
+
+<section class="cards three">
+  <article class="card">
+    <div class="label">Total repos scanned</div>
+    <div class="value">{{ "{:,}".format(stats.total_repos) }}</div>
+    <div class="sub">(repositories where these tools appear in dependency files)</div>
+  </article>
+  <article class="card">
+    <div class="label">Tools tracked</div>
+    <div class="value">{{ "{:,}".format(stats.total_tools) }}</div>
+    <div class="sub">(distinct developer tools in this intelligence universe)</div>
+  </article>
+  <article class="card">
+    <div class="label">Today's most interesting signal</div>
+    <div class="value green">{{ stats.biggest_mover.display_name if stats.biggest_mover else "N/A" }} ↑ fastest growing</div>
+    <div class="sub">(tool with the highest emergence score today, meaning fastest relative growth)</div>
+  </article>
+</section>
+
+<section>
+  <h2>What's worth paying attention to right now</h2>
+  <p class="subtitle">These are the tools with the most momentum (growing fast relative to their size).</p>
+  <div class="cards three">
+    {% for m in movers %}
+    <article class="card mover-card">
+      <div class="mover-head">
+        <span class="pill">{{ m.category }}</span>
+        <span class="pill signal" style="color: {{ m.signal_color }}; border-color: {{ m.signal_color }}44; background: {{ m.signal_color }}22">{{ m.signal_badge }}</span>
+      </div>
+      <h3>{{ m.display_name }}</h3>
+      <p>{{ m.description }}</p>
+      <hr>
+      <ul class="metric-list">
+        <li>Used in: <strong>{{ "{:,}".format(m.total_repos|int) }}</strong> <span>(repositories using this tool)</span></li>
+        <li>New (90d): <strong>{{ "{:,}".format(m.new_repos_90d|int) }}</strong> <span>(new repositories that started using it recently)</span></li>
+        <li>Activity: <strong>{{ "%.0f"|format(m.activity_pct) }}%</strong> <span>(share of using repositories updated in the last 30 days)</span></li>
+      </ul>
+      <div class="small-note">{{ m.signal_explainer }} (signal interpretation)</div>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+
+<section>
+  <h2>State of each category</h2>
+  <p class="subtitle">A category is a group of tools that solve the same problem. Is there a clear winner or is it still anyone's game?</p>
+  <div class="cards three">
+    {% for c in categories %}
+    {% set ru = category_runner_ups[c.category] %}
+    <article class="card">
+      <h3>{{ c.category }}</h3>
+      <span class="phase-badge">{{ c.market_phase }}</span>
+      <div class="sub" style="margin-top: 10px">{{ phase_short_label(c.market_phase) }} (competitive state)</div>
+      <hr>
+      <ul class="metric-list">
+        <li>Top tool: <strong>{{ c.top_tool }}</strong> <span>({{ "%.0f"|format(c.top_tool_share_pct|float) }}% of repos in this category)</span></li>
+        <li>Runner up: <strong>{{ ru.name }}</strong> <span>({{ "%.0f"|format(ru.share|float) }}% of repos in this category)</span></li>
+      </ul>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="explainer-band">
+  <strong>How to read this:</strong> Numbers here come from scanning real code repositories on GitHub.
+  When we say “8,102 repos use Vitest”, we mean 8,102 public projects with 500+ GitHub stars have Vitest in their dependency file.
+  This is ground-truth adoption data (what is installed in code) — not surveys, social media, or self-reported usage.
+</section>
+{% endblock %}

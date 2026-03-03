@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block content %}
+<section>
+  <h1>How to Read This</h1>
+  <p class="subtitle">Under The Hood in plain English — no technical background required.</p>
+</section>
+
+<section class="card long-text">
+  <h2>What is this?</h2>
+  <p>Under The Hood scans thousands of real software projects on GitHub and looks at what tools they have installed. Not what developers say they use. Not what's trending on social media. What's literally in their code.</p>
+  <p>Think of it like a supermarket scanner for software. Instead of checking what people say they're buying, we look at what's actually in their cart.</p>
+</section>
+
+<section>
+  <h2>The key concepts</h2>
+  <details class="card"><summary>What is a 'repo' or 'repository'?</summary>
+    <p>A repository is a project on GitHub — a collection of code, usually for one piece of software. "8,102 repos use Vitest" means 8,102 separate software projects have Vitest installed.</p>
+    <p>We only track repos with 500+ GitHub stars. Stars are roughly like likes: they indicate other developers found the project useful. This filter removes hobby projects and abandoned experiments.</p>
+  </details>
+  <details class="card"><summary>What is a 'dependency'?</summary>
+    <p>Developers do not write everything from scratch. They use pre-built tools — dependencies — for common tasks. Dependency files (like <code>package.json</code> or <code>requirements.txt</code>) list these tools.</p>
+    <p>Scanning dependencies means reading those lists across thousands of projects to see which tools appear most often.</p>
+  </details>
+  <details class="card"><summary>What is 'adoption' and how is it different from popularity?</summary>
+    <p>Popularity means people talk about it. Adoption means people actually use it in production code.</p>
+    <p>A tool can trend online but have low real-world use, or be heavily used and rarely discussed. This product measures adoption in code, not hype in conversation.</p>
+  </details>
+  <details class="card"><summary>What is the 'Emergence Score'?</summary>
+    <p>A tool with 200 projects growing 40% is often more interesting than a tool with 15,000 projects growing 2%. Emergence score rewards growth relative to size.</p>
+    <p>High emergence means fast growth from a smaller base (often an early signal). Low emergence plus high adoption usually means stable infrastructure.</p>
+  </details>
+  <details class="card"><summary>What does 'market phase' mean?</summary>
+    <p><strong>Early / Competing</strong>: many tools exist, none clearly winning.</p>
+    <p><strong>Consolidating</strong>: a winner is pulling ahead but has not fully won.</p>
+    <p><strong>Mature</strong>: one tool has effectively won the category.</p>
+    <p><strong>Fragmenting</strong>: many tools, but none gaining momentum.</p>
+  </details>
+  <details class="card"><summary>What does this NOT tell you?</summary>
+    <p>It only covers public code (not private enterprise repos). Being listed in dependencies does not guarantee active use in all features. 500+ star filtering improves quality but can miss very new tools.</p>
+    <p>This is not a preference survey. It is an install-base measurement.</p>
+  </details>
+</section>
+
+<section class="card long-text">
+  <h2>Who is this for?</h2>
+  <p><strong>Developers</strong>: choose between competing tools using real adoption data.</p>
+  <p><strong>Investors and analysts</strong>: open-source adoption often leads enterprise buying patterns.</p>
+  <p><strong>The curious</strong>: understand what the software ecosystem is building right now without reading thousands of repositories.</p>
+</section>
+{% endblock %}

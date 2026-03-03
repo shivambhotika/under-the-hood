@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block content %}
+<section>
+  <h1>Category Intelligence</h1>
+  <p class="subtitle">A category groups tools that solve the same problem. Seeing them side-by-side shows who's winning.</p>
+
+  <form method="get" action="{{ url_for('category_view') }}" class="selector-form">
+    <label for="name">Choose a category</label>
+    <select name="name" id="name" onchange="this.form.submit()">
+      {% for c in categories %}
+      <option value="{{ c.category }}" {% if c.category == selected %}selected{% endif %}>{{ c.category }}</option>
+      {% endfor %}
+    </select>
+  </form>
+</section>
+
+<section>
+  <h2>{{ cat.category }}</h2>
+  <span class="phase-badge">{{ cat.market_phase }}</span>
+  <p class="subtitle">{{ phase_explainer(cat.market_phase) }} (what this phase means for decision-makers).</p>
+</section>
+
+<section class="cards three">
+  <article class="card">
+    <div class="label">Tools tracked in this category</div>
+    <div class="value">{{ "{:,}".format(cat.tool_count|int) }}</div>
+    <div class="sub">(distinct tools being compared in this problem area)</div>
+  </article>
+  <article class="card">
+    <div class="label">Total repos across category</div>
+    <div class="value">{{ "{:,}".format(total_repos|int) }}</div>
+    <div class="sub">(sum of repositories that use at least one tracked tool here)</div>
+  </article>
+  <article class="card">
+    <div class="label">Fragmentation index</div>
+    <div class="value">{{ cat.fragmentation_plain }}</div>
+    <div class="sub">(plain-English concentration signal; higher fragmentation means less agreement)</div>
+  </article>
+</section>
+
+<section class="insight-box">
+  <div class="label">Category insight</div>
+  <p>{{ cat.insight_text }}</p>
+  <div class="small-note">Auto-generated from adoption data · Not editorial opinion</div>
+</section>
+
+<section>
+  <h2>Where is the energy concentrating?</h2>
+  <p class="subtitle">The bigger the bar, the more projects are using that tool (bar length equals repository count in this category).</p>
+  {{ bar_html|safe }}
+</section>
+
+<section>
+  <h2>All tools in this category, compared</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Tool</th>
+          <th>Used in</th>
+          <th>New (90d)</th>
+          <th>Still Active</th>
+          <th>Signal</th>
+          <th>What it is</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr class="{{ r.row_class }}">
+          <td>{{ r.tool }}</td>
+          <td>{{ r.used_in }}</td>
+          <td>{{ r.new_90d }}</td>
+          <td>{{ r.active }}</td>
+          <td>{{ r.signal }}</td>
+          <td>{{ r.what }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
