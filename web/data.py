@@ -8,7 +8,40 @@ from typing import Any, Callable
 
 import numpy as np
 
+try:
+    from scripts.enterprise_orgs import ENTERPRISE_ORGS
+except ModuleNotFoundError:
+    from enterprise_orgs import ENTERPRISE_ORGS
+
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "uth.db"
+RADAR_MAX_REPOS = 400
+RADAR_MIN_GROWTH_RATIO = 0.20
+RADAR_MIN_TOTAL_REPOS = 8
+
+NOTABLE_INSTITUTIONS = {
+    "mit",
+    "stanford",
+    "uc berkeley",
+    "berkeley",
+    "carnegie mellon",
+    "cmu",
+    "oxford",
+    "cambridge",
+    "eth zurich",
+    "epfl",
+    "toronto",
+    "deepmind",
+    "google brain",
+    "google research",
+    "microsoft research",
+    "meta ai",
+    "fair",
+    "openai",
+    "anthropic",
+    "nvidia research",
+    "apple",
+    "amazon science",
+}
 
 
 def ttl_cache(seconds: int = 3600) -> Callable:
@@ -40,6 +73,21 @@ def _conn() -> sqlite3.Connection:
 
 def _row_dicts(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
+
+
+def _decorate_repo_rows(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        full = str(item.get("repo_full_name") or "")
+        if "/" in full:
+            org, repo = full.split("/", 1)
+        else:
+            org, repo = full, ""
+        item["org"] = org
+        item["repo"] = repo
+        out.append(item)
+    return out
 
 
 @ttl_cache(60)
@@ -105,7 +153,8 @@ def get_all_tools(ecosystem: str | None = None, category: str | None = None) -> 
                 COALESCE(s.active_repos, 0) AS active_repos,
                 COALESCE(s.new_repos_90d, 0) AS new_repos_90d,
                 COALESCE(s.emergence_score, 0) AS emergence_score,
-                COALESCE(s.stars_median, 0) AS stars_median
+                COALESCE(s.stars_median, 0) AS stars_median,
+                COALESCE(s.enterprise_repo_count, 0) AS enterprise_repo_count
             FROM tools t
             LEFT JOIN tool_snapshots s
               ON s.canonical_name = t.canonical_name
@@ -161,7 +210,8 @@ def get_tool_detail(canonical_name: str) -> dict[str, Any] | None:
                 COALESCE(s.active_repos, 0) AS active_repos,
                 COALESCE(s.new_repos_90d, 0) AS new_repos_90d,
                 COALESCE(s.emergence_score, 0) AS emergence_score,
-                COALESCE(s.stars_median, 0) AS stars_median
+                COALESCE(s.stars_median, 0) AS stars_median,
+                COALESCE(s.enterprise_repo_count, 0) AS enterprise_repo_count
             FROM tools t
             LEFT JOIN tool_snapshots s
               ON s.canonical_name = t.canonical_name
@@ -188,11 +238,26 @@ def get_tool_detail(canonical_name: str) -> dict[str, Any] | None:
             (canonical_name,),
         ).fetchall()
 
-        top_repos = conn.execute(
+        enterprise_repos = conn.execute(
             """
             SELECT repo_full_name, stars
             FROM tool_repos
-            WHERE canonical_name = ? AND stars > 0
+            WHERE canonical_name = ?
+              AND stars > 0
+              AND is_enterprise_repo = 1
+            ORDER BY stars DESC
+            LIMIT 8
+            """,
+            (canonical_name,),
+        ).fetchall()
+
+        community_repos = conn.execute(
+            """
+            SELECT repo_full_name, stars
+            FROM tool_repos
+            WHERE canonical_name = ?
+              AND stars > 0
+              AND COALESCE(is_enterprise_repo, 0) = 0
             ORDER BY stars DESC
             LIMIT 8
             """,
@@ -211,7 +276,9 @@ def get_tool_detail(canonical_name: str) -> dict[str, Any] | None:
 
     out = dict(tool)
     out["version_spread"] = _row_dicts(versions)
-    out["top_repos"] = _row_dicts(top_repos)
+    out["enterprise_repos"] = _decorate_repo_rows(enterprise_repos)
+    out["community_repos"] = _decorate_repo_rows(community_repos)
+    out["top_repos"] = out["community_repos"]
     out["history"] = _row_dicts(history)
     return out
 
@@ -226,6 +293,93 @@ def get_all_categories() -> list[dict[str, Any]]:
 @ttl_cache(900)
 def get_category_tools(category: str) -> list[dict[str, Any]]:
     return get_all_tools(category=category)
+
+
+@ttl_cache(3600)
+def get_tool_contributors(canonical_name: str) -> list[dict[str, Any]]:
+    with _conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT canonical_name, github_login, contributions, avatar_url, html_url,
+                   name, company, bio, location, followers, public_repos,
+                   twitter_username, fetched_at
+            FROM tool_contributors
+            WHERE canonical_name = ?
+            ORDER BY contributions DESC, followers DESC
+            LIMIT 8
+            """,
+            (canonical_name,),
+        ).fetchall()
+    return _row_dicts(rows)
+
+
+def is_notable_contributor(contributor: dict[str, Any]) -> bool:
+    followers = int(contributor.get("followers") or 0)
+    if followers >= 500:
+        return True
+    company = str(contributor.get("company") or "").lower().strip().lstrip("@")
+    return any(inst in company for inst in NOTABLE_INSTITUTIONS)
+
+
+def get_pre_commercial_signal(
+    canonical_name: str, github_repo: str | None, contributors: list[dict[str, Any]] | None = None
+) -> bool:
+    _ = canonical_name
+    if not github_repo:
+        return False
+    org = github_repo.split("/")[0].lower()
+    if org in ENTERPRISE_ORGS:
+        return False
+    if contributors:
+        top_login = str(contributors[0].get("github_login") or "").lower()
+        if top_login and top_login == org:
+            return True
+    return True
+
+
+@ttl_cache(3600)
+def get_radar_tools() -> list[dict[str, Any]]:
+    snap = latest_snapshot_date()
+    if not snap:
+        return []
+    with _conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                t.canonical_name,
+                t.display_name,
+                t.ecosystem,
+                t.category,
+                t.description,
+                t.github_repo,
+                COALESCE(s.total_repos, 0) AS total_repos,
+                COALESCE(s.new_repos_90d, 0) AS new_repos_90d,
+                COALESCE(s.active_repos, 0) AS active_repos,
+                COALESCE(s.emergence_score, 0) AS emergence_score,
+                COALESCE(s.enterprise_repo_count, 0) AS enterprise_repo_count
+            FROM tools t
+            JOIN tool_snapshots s ON s.canonical_name = t.canonical_name
+            WHERE s.snapshot_date = ?
+              AND s.total_repos >= ?
+              AND s.total_repos <= ?
+              AND (
+                (1.0 * COALESCE(s.new_repos_90d, 0)) /
+                CASE WHEN COALESCE(s.total_repos, 0) <= 0 THEN 1 ELSE s.total_repos END
+              ) >= ?
+            ORDER BY s.emergence_score DESC, s.total_repos DESC
+            """,
+            (snap, RADAR_MIN_TOTAL_REPOS, RADAR_MAX_REPOS, RADAR_MIN_GROWTH_RATIO),
+        ).fetchall()
+
+    result = _row_dicts(rows)
+    for row in result:
+        total = int(row.get("total_repos") or 0)
+        new_90d = int(row.get("new_repos_90d") or 0)
+        row["growth_ratio"] = (new_90d / max(1, total)) if total else 0.0
+        row["pre_commercial_signal"] = get_pre_commercial_signal(
+            row.get("canonical_name"), row.get("github_repo")
+        )
+    return result
 
 
 def signal_label(emergence_score: float, total_repos: int) -> tuple[str, str, str]:

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from urllib.parse import quote_plus
-
 import plotly.graph_objects as go
 from flask import Flask, redirect, render_template, request, url_for
 
@@ -11,9 +9,13 @@ from web.data import (
     get_all_categories,
     get_all_tools,
     get_category_tools,
+    get_pre_commercial_signal,
+    get_radar_tools,
     get_summary_stats,
     get_tool_detail,
+    get_tool_contributors,
     get_top_movers,
+    is_notable_contributor,
     phase_explainer,
     signal_label,
 )
@@ -71,6 +73,7 @@ def home():
     stats = get_summary_stats()
     movers = get_top_movers(6)
     categories = get_all_categories()
+    radar_count = len(get_radar_tools())
 
     category_runner_ups: dict[str, dict] = {}
     for cat in categories:
@@ -108,6 +111,7 @@ def home():
         movers=movers,
         categories=categories,
         category_runner_ups=category_runner_ups,
+        radar_count=radar_count,
     )
 
 
@@ -127,6 +131,13 @@ def tool_detail():
     tool = get_tool_detail(canonical)
     if not tool:
         return redirect(url_for("home"))
+
+    contributors = get_tool_contributors(canonical)
+    for c in contributors:
+        c["is_notable"] = is_notable_contributor(c)
+    pre_commercial_signal = get_pre_commercial_signal(
+        canonical, tool.get("github_repo"), contributors=contributors
+    )
 
     insight = generate_tool_insight(tool)
     active_pct = (int(tool["active_repos"]) / max(1, int(tool["total_repos"]))) * 100
@@ -180,6 +191,8 @@ def tool_detail():
         tools=tools,
         selected=canonical,
         tool=tool,
+        contributors=contributors,
+        pre_commercial_signal=pre_commercial_signal,
         insight=insight,
         active_pct=active_pct,
         version_chart_html=version_chart_html,
@@ -253,6 +266,7 @@ def category_view():
                 "used_in": f"{int(t['total_repos']):,} (repos using this tool)",
                 "new_90d": f"{int(t['new_repos_90d']):,} (new adopters in last 90 days)",
                 "active": f"{active_pct:.0f}% (share of using repos updated in last 30 days)",
+                "enterprise": int(t.get("enterprise_repo_count") or 0),
                 "signal": f"{signal} (momentum classification)",
                 "what": (t["description"][:57] + "...") if len(t["description"]) > 60 else t["description"],
                 "row_class": row_class,
@@ -268,6 +282,46 @@ def category_view():
         total_repos=total_repos,
         bar_html=bar_html,
         rows=rows,
+    )
+
+
+@app.get("/radar")
+def radar():
+    if not db_has_data():
+        return render_template("empty.html", page_title="The Radar")
+
+    tools = get_radar_tools()
+    for tool in tools:
+        contributors = get_tool_contributors(tool["canonical_name"])
+        top_builders = []
+        for c in contributors[:2]:
+            top_builders.append(
+                {
+                    "github_login": c.get("github_login"),
+                    "followers": int(c.get("followers") or 0),
+                    "company": c.get("company") or "",
+                    "html_url": c.get("html_url") or "",
+                }
+            )
+        tool["top_builders"] = top_builders
+        tool["pre_commercial_signal"] = get_pre_commercial_signal(
+            tool["canonical_name"], tool.get("github_repo"), contributors=contributors
+        )
+        ent = int(tool.get("enterprise_repo_count") or 0)
+        if ent >= 1:
+            tool["signal_border"] = "signal-green"
+        elif tool["pre_commercial_signal"]:
+            tool["signal_border"] = "signal-amber"
+        else:
+            tool["signal_border"] = "signal-default"
+
+    return render_template(
+        "radar.html",
+        page_title="The Radar",
+        tools=tools,
+        radar_count=len(tools),
+        radar_max_repos=400,
+        radar_min_growth_pct=20,
     )
 
 

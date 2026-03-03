@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block content %}
+<section>
+  <h1>🔭 The Radar</h1>
+  <p class="subtitle">
+    Tools that look like Spark in 2011.<br>
+    Small. Accelerating. Pre-commercial.
+  </p>
+  <p class="subtitle" style="max-width: 900px;">
+    These tools have fewer than {{ radar_max_repos }} repositories using them — but more than
+    {{ radar_min_growth_pct }}% of those repos were created in the last 90 days. That combination
+    of small base + fast growth is historically where the most interesting infrastructure companies get found earliest.
+  </p>
+</section>
+
+{% if tools %}
+<section class="radar-grid">
+  {% for t in tools %}
+  <article class="card radar-card {{ t.signal_border }}">
+    <div class="radar-head">
+      {% if t.pre_commercial_signal %}
+      <span class="pill pre-commercial">Pre-commercial</span>
+      {% endif %}
+      <span class="pill">{{ t.ecosystem }}</span>
+      <span class="pill">{{ t.category }}</span>
+    </div>
+
+    <h2>{{ t.display_name }}</h2>
+    <p>{{ t.description }}</p>
+
+    <hr>
+    <ul class="metric-list">
+      <li>Repos using it: <strong>{{ "{:,}".format(t.total_repos|int) }}</strong> <span>(still under {{ radar_max_repos }})</span></li>
+      <li>New in 90 days: <strong>{{ "{:,}".format(t.new_repos_90d|int) }}</strong> <span>({{ "%.0f"|format((t.growth_ratio|float) * 100) }}% of base)</span></li>
+      <li>Enterprise orgs: <strong>{% if t.enterprise_repo_count|int > 0 %}{{ t.enterprise_repo_count|int }} detected{% else %}None yet{% endif %}</strong></li>
+      <li>Emergence score: <strong>{{ "%.2f"|format(t.emergence_score|float) }}</strong></li>
+    </ul>
+
+    {% if t.top_builders %}
+    <div class="radar-builders">
+      <div class="label">Top builders</div>
+      {% for b in t.top_builders %}
+      <div class="small-note">
+        {% if b.html_url %}<a href="{{ b.html_url }}" target="_blank" class="builder-login">@{{ b.github_login }}</a>{% else %}@{{ b.github_login }}{% endif %}
+        ({{ "{:,}".format(b.followers|int) }} followers{% if b.company %} · {{ b.company }}{% endif %})
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <a class="radar-banner-link" href="{{ url_for('tool_detail', name=t.canonical_name) }}">View Full Analysis →</a>
+  </article>
+  {% endfor %}
+</section>
+{% else %}
+<section class="card">
+  <h2>No tools currently meet the Radar threshold.</h2>
+  <p class="subtitle" style="margin-bottom: 0;">
+    This means either the data pipeline has not run yet, or all tracked tools have grown beyond the early-stage window.
+    Try running: <code>python3 scripts/run_all.py</code>
+  </p>
+</section>
+{% endif %}
+
+<section class="card long-text" style="margin-top: 26px;">
+  <h2>How to use The Radar</h2>
+  <p>
+    The Radar surfaces tools in the pre-commercial window — after they have proven real adoption but before a company has been built around them.
+    This is historically the highest-value discovery window for investors.
+  </p>
+  <p><strong>What to look for:</strong></p>
+  <ul>
+    <li>Enterprise adopters (even 1-2) signal real-world validation</li>
+    <li>Contributors with research credentials or strong community reputation</li>
+    <li>A clear problem being solved (check the tool description)</li>
+    <li>No known VC funding or commercial entity yet</li>
+  </ul>
+  <p><strong>What this is NOT:</strong></p>
+  <ul>
+    <li>A prediction that these tools will succeed</li>
+    <li>A complete picture (private repos are invisible)</li>
+    <li>A recommendation to invest in anything</li>
+  </ul>
+</section>
+{% endblock %}

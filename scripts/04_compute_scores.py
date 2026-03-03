@@ -7,8 +7,26 @@ import math
 
 try:
     from scripts.db import get_conn, init_db
+    from scripts.enterprise_orgs import ENTERPRISE_ORGS
 except ModuleNotFoundError:
     from db import get_conn, init_db
+    from enterprise_orgs import ENTERPRISE_ORGS
+
+
+CATEGORY_DESCRIPTIONS = {
+    "Testing": "Tools for writing and running automated tests to validate software behavior.",
+    "ORM": "Libraries for working with databases using application models instead of raw SQL.",
+    "Linting": "Tools that enforce code quality, formatting, typing, and style consistency.",
+    "Package Manager": "Tools used to install, resolve, and lock project dependencies.",
+    "API Framework": "Frameworks used to build backend web services and APIs.",
+    "UI Components": "Libraries of reusable interface components for front-end applications.",
+    "Bundler": "Build tools that compile, bundle, and optimize application code.",
+    "State Management": "Tools that manage shared application state and data flow in apps.",
+    "AI/ML": "Frameworks and SDKs for building AI-powered applications and agent systems.",
+    "AI Observability": "Tools for monitoring, debugging, and evaluating LLM applications and AI agents.",
+    "Vector DB": "Databases optimized for storing and searching high-dimensional vector embeddings.",
+    "Data Pipeline": "Tools for orchestrating, scheduling, and monitoring data workflows.",
+}
 
 
 def compute_emergence_score(total_repos: int, new_repos_90d: int, active_repos: int) -> float:
@@ -131,21 +149,39 @@ def recompute_today_snapshot(conn, canonical_name: str, snapshot_date: str) -> N
     star_med = float(median(star_vals)) if star_vals else 0.0
 
     emergence = compute_emergence_score(total, new_90, active)
+    enterprise_repo_count = conn.execute(
+        """
+        SELECT COUNT(*) AS cnt
+        FROM tool_repos
+        WHERE canonical_name = ? AND is_enterprise_repo = 1
+        """,
+        (canonical_name,),
+    ).fetchone()["cnt"]
 
     conn.execute(
         """
         INSERT INTO tool_snapshots (
             canonical_name, snapshot_date, total_repos, active_repos,
-            new_repos_90d, stars_median, emergence_score
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            new_repos_90d, stars_median, emergence_score, enterprise_repo_count
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(canonical_name, snapshot_date) DO UPDATE SET
             total_repos=excluded.total_repos,
             active_repos=excluded.active_repos,
             new_repos_90d=excluded.new_repos_90d,
             stars_median=excluded.stars_median,
-            emergence_score=excluded.emergence_score
+            emergence_score=excluded.emergence_score,
+            enterprise_repo_count=excluded.enterprise_repo_count
         """,
-        (canonical_name, snapshot_date, int(total), int(active), int(new_90), round(star_med, 2), emergence),
+        (
+            canonical_name,
+            snapshot_date,
+            int(total),
+            int(active),
+            int(new_90),
+            round(star_med, 2),
+            emergence,
+            int(enterprise_repo_count or 0),
+        ),
     )
 
 
@@ -224,7 +260,7 @@ def upsert_category(conn, category: str, snapshot_date: str) -> None:
             category,
             ecosystem,
             tool_count,
-            f"Tools in the {category} category.",
+            CATEGORY_DESCRIPTIONS.get(category, f"Tools in the {category} category."),
             phase,
             phase_explanation,
             frag_idx,
@@ -236,11 +272,31 @@ def upsert_category(conn, category: str, snapshot_date: str) -> None:
     )
 
 
+def flag_enterprise_repos(conn) -> None:
+    cursor = conn.cursor()
+    cursor.execute("UPDATE tool_repos SET is_enterprise_repo = 0")
+    repos = cursor.execute("SELECT DISTINCT repo_full_name FROM tool_repos").fetchall()
+    enterprise_count = 0
+    for row in repos:
+        repo_full_name = row["repo_full_name"]
+        org = repo_full_name.split("/")[0].lower()
+        if org in ENTERPRISE_ORGS:
+            cursor.execute(
+                "UPDATE tool_repos SET is_enterprise_repo = 1 WHERE repo_full_name = ?",
+                (repo_full_name,),
+            )
+            enterprise_count += 1
+    conn.commit()
+    print(f"  -> Flagged {enterprise_count} enterprise repos")
+
+
 def main() -> None:
     init_db()
     snapshot_date = datetime.now(timezone.utc).date().isoformat()
 
     with get_conn() as conn:
+        flag_enterprise_repos(conn)
+
         tools = conn.execute("SELECT canonical_name FROM tools ORDER BY canonical_name").fetchall()
         for row in tools:
             recompute_today_snapshot(conn, row["canonical_name"], snapshot_date)

@@ -221,6 +221,36 @@ hr {
   color: #d4d4d8;
 }
 
+.radar-banner {
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--green);
+  border-radius: 12px;
+  padding: 16px;
+  margin: 18px 0 28px;
+  background: rgba(15, 15, 18, 0.92);
+}
+
+.radar-banner-title {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.radar-banner-sub {
+  color: #a1a1aa;
+  margin-bottom: 10px;
+}
+
+.radar-banner-link {
+  color: #86efac;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.radar-banner-link:hover {
+  text-decoration: underline;
+}
+
 .selector-form {
   margin-top: 16px;
 }
@@ -281,6 +311,136 @@ hr {
   font-family: "IBM Plex Mono", monospace;
   font-size: 12px;
   background: rgba(15, 15, 18, 0.9);
+}
+
+.repo-row.enterprise {
+  border-color: rgba(34, 197, 94, 0.35);
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.org-highlight {
+  color: #86efac;
+}
+
+.tier-title {
+  margin-top: 14px;
+  margin-bottom: 8px;
+  font-size: 16px;
+}
+
+.builder-section {
+  margin-top: 8px;
+}
+
+.pre-commercial-pill {
+  display: inline-block;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  background: rgba(34, 197, 94, 0.12);
+  color: #86efac;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  margin-bottom: 12px;
+}
+
+.builder-list {
+  display: grid;
+  gap: 10px;
+}
+
+.builder-card {
+  display: grid;
+  grid-template-columns: 48px 1fr;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  background: rgba(15, 15, 18, 0.9);
+}
+
+.builder-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  object-fit: cover;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.builder-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+}
+
+.builder-login {
+  color: #93c5fd;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.builder-login:hover {
+  text-decoration: underline;
+}
+
+.builder-followers {
+  color: #a1a1aa;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+}
+
+.builder-meta,
+.builder-bio,
+.builder-contrib {
+  font-size: 12px;
+  line-height: 1.6;
+  color: #d4d4d8;
+}
+
+.builder-notable {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 3px 8px;
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  border-radius: 999px;
+  color: #facc15;
+  background: rgba(250, 204, 21, 0.08);
+  font-size: 10px;
+  font-family: "IBM Plex Mono", monospace;
+}
+
+.radar-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.radar-card {
+  border-left: 4px solid var(--border);
+}
+
+.radar-card.signal-green {
+  border-left-color: var(--green);
+}
+
+.radar-card.signal-amber {
+  border-left-color: var(--amber);
+}
+
+.radar-card.signal-default {
+  border-left-color: var(--border);
+}
+
+.radar-head {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.radar-builders {
+  margin: 10px 0 12px;
 }
 
 .repo-row small {
@@ -385,5 +545,16 @@ details p {
 
   .content {
     padding: 18px;
+  }
+}
+
+@media (max-width: 768px) {
+  .radar-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .builder-head {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }

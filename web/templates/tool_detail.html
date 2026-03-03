@@ -46,6 +46,38 @@
   </article>
 </section>
 
+<section class="builder-section">
+  <h2>Who's Building This</h2>
+  <p class="subtitle">The team behind a tool matters as much as the tool itself. Credential signals from the builders are often the earliest indicator of long-term success.</p>
+  {% if pre_commercial_signal %}
+  <div class="pre-commercial-pill">🔭 Pre-commercial — no known company formed yet</div>
+  {% endif %}
+
+  {% if contributors %}
+    <div class="builder-list">
+      {% for c in contributors[:5] %}
+      <article class="builder-card">
+        <img class="builder-avatar" src="{{ c.avatar_url or 'https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png' }}" alt="{{ c.github_login }} avatar">
+        <div class="builder-body">
+          <div class="builder-head">
+            <a href="{{ c.html_url }}" target="_blank" class="builder-login">@{{ c.github_login }}</a>
+            <span class="builder-followers">★ {{ "{:,}".format(c.followers|int) }} followers</span>
+          </div>
+          <div class="builder-meta">{{ c.name or "Unknown" }} · {{ c.company or "Independent" }} · {{ c.location or "Location unknown" }}</div>
+          <div class="builder-bio">{{ (c.bio or "No bio available")[:80] }}{% if c.bio and c.bio|length > 80 %}...{% endif %}</div>
+          <div class="builder-contrib">{{ "{:,}".format(c.contributions|int) }} commits to this repo</div>
+          {% if c.is_notable %}
+          <span class="builder-notable">★ NOTABLE</span>
+          {% endif %}
+        </div>
+      </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="card">Contributor data not yet collected. Run scripts/06_fetch_contributors.py</div>
+  {% endif %}
+</section>
+
 <section class="insight-box">
   <div class="label">What this means</div>
   <p>{{ insight }}</p>
@@ -64,16 +96,31 @@
   </div>
   <div>
     <h2>Notable projects using this tool</h2>
-    <p class="subtitle">High-star repositories are usually well-maintained projects (quality signal from community attention).</p>
-    {% if tool.top_repos %}
-      {% for repo in tool.top_repos %}
+    <p class="subtitle">High-star repositories are usually well-maintained, serious projects — a useful quality signal.</p>
+
+    <h3 class="tier-title">🏢 Enterprise Adopters</h3>
+    <p class="subtitle">Adoption by engineering-rigorous organizations is a quality signal.</p>
+    {% if tool.enterprise_repos %}
+      {% for repo in tool.enterprise_repos %}
+      <div class="repo-row enterprise">
+        <span><strong class="org-highlight">{{ repo.org }}</strong>{% if repo.repo %}/{{ repo.repo }}{% endif %}</span>
+        <span>★ {{ format_compact(repo.stars|int) }} <small>(GitHub stars)</small></span>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div class="small-note">No enterprise adopters detected yet. Early-stage tools often show enterprise adoption 6–12 months after OSS momentum begins.</div>
+    {% endif %}
+
+    <h3 class="tier-title">Community Projects</h3>
+    {% if tool.community_repos %}
+      {% for repo in tool.community_repos %}
       <div class="repo-row">
         <span>{{ repo.repo_full_name }}</span>
         <span>★ {{ format_compact(repo.stars|int) }} <small>(GitHub stars)</small></span>
       </div>
       {% endfor %}
     {% else %}
-      <div class="card">No notable repositories found yet.</div>
+      <div class="card">No notable community repositories found yet.</div>
     {% endif %}
   </div>
 </section>

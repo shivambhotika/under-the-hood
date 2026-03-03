@@ -2,7 +2,7 @@
 {% block content %}
 <section>
   <h1>What the open source world is actually building.</h1>
-  <p class="subtitle">Tracking <strong>{{ "{:,}".format(stats.total_tools) }} tools</strong> across <strong>{{ "{:,}".format(stats.total_repos) }} repositories</strong> (public projects with 500+ GitHub stars). Updated daily. No hype.</p>
+  <p class="subtitle">Tracking <strong>{{ "{:,}".format(stats.total_tools) }} tools</strong> across <strong>{{ "{:,}".format(stats.total_repos) }} repositories</strong>. Ground-truth adoption data from real code — not surveys, not social media. Updated daily.</p>
 </section>
 
 <section class="cards three">
@@ -25,7 +25,7 @@
 
 <section>
   <h2>What's worth paying attention to right now</h2>
-  <p class="subtitle">These are the tools with the most momentum (growing fast relative to their size).</p>
+  <p class="subtitle">These are the tools with the most momentum. High emergence score means growing fast relative to their current size — historically the strongest early signal.</p>
   <div class="cards three">
     {% for m in movers %}
     <article class="card mover-card">
@@ -47,6 +47,12 @@
   </div>
 </section>
 
+<section class="radar-banner">
+  <div class="radar-banner-title">🔭 The Radar — {{ radar_count }} tools in the pre-commercial window</div>
+  <div class="radar-banner-sub">Tools small enough to still be early, growing fast enough to be a signal.</div>
+  <a class="radar-banner-link" href="{{ url_for('radar') }}">View The Radar →</a>
+</section>
+
 <section>
   <h2>State of each category</h2>
   <p class="subtitle">A category is a group of tools that solve the same problem. Is there a clear winner or is it still anyone's game?</p>
@@ -65,6 +71,11 @@
     </article>
     {% endfor %}
   </div>
+  <p style="color: var(--muted); font-size: 13px; max-width: 700px; line-height: 1.7; margin-top: 16px;">
+    Open-source adoption is a leading indicator. Spark won OSS in 2012.
+    Databricks raised its Series A in 2013. The tools with momentum today
+    become the enterprise platforms companies pay for tomorrow.
+  </p>
 </section>
 
 <section class="explainer-band">

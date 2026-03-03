@@ -8,6 +8,7 @@ scripts = [
     ("02_search_adoption.py", "Searching GitHub for adoption data"),
     ("03_enrich_repos.py", "Enriching repo metadata"),
     ("04_compute_scores.py", "Computing scores and insights"),
+    ("06_fetch_contributors.py", "Fetching contributor intelligence"),
 ]
 
 print("\n🔧 Under The Hood — Data Pipeline")

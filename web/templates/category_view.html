@@ -60,6 +60,7 @@
           <th>Used in</th>
           <th>New (90d)</th>
           <th>Still Active</th>
+          <th>Enterprise</th>
           <th>Signal</th>
           <th>What it is</th>
         </tr>
@@ -71,6 +72,7 @@
           <td>{{ r.used_in }}</td>
           <td>{{ r.new_90d }}</td>
           <td>{{ r.active }}</td>
+          <td>{% if r.enterprise > 0 %}{{ r.enterprise }} orgs{% else %}—{% endif %}</td>
           <td>{{ r.signal }}</td>
           <td>{{ r.what }}</td>
         </tr>

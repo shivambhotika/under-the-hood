@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS tool_snapshots (
     new_repos_90d INTEGER DEFAULT 0,
     stars_median REAL DEFAULT 0,
     emergence_score REAL DEFAULT 0,
+    enterprise_repo_count INTEGER DEFAULT 0,
     UNIQUE(canonical_name, snapshot_date),
     FOREIGN KEY (canonical_name) REFERENCES tools(canonical_name)
 );
@@ -61,6 +62,7 @@ CREATE TABLE IF NOT EXISTS tool_repos (
     dep_type TEXT DEFAULT 'runtime',
     version_declared TEXT,
     version_normalized TEXT,
+    is_enterprise_repo INTEGER DEFAULT 0,
     found_at TEXT DEFAULT (datetime('now')),
     UNIQUE(canonical_name, repo_full_name),
     FOREIGN KEY (canonical_name) REFERENCES tools(canonical_name)
@@ -117,6 +119,26 @@ CREATE TABLE IF NOT EXISTS repo_manifests (
     PRIMARY KEY (repo_full_name, manifest_path)
 );
 
+-- Top contributors by tool
+CREATE TABLE IF NOT EXISTS tool_contributors (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    canonical_name TEXT NOT NULL,
+    github_login TEXT NOT NULL,
+    contributions INTEGER DEFAULT 0,
+    avatar_url TEXT,
+    html_url TEXT,
+    name TEXT,
+    company TEXT,
+    bio TEXT,
+    location TEXT,
+    followers INTEGER DEFAULT 0,
+    public_repos INTEGER DEFAULT 0,
+    twitter_username TEXT,
+    fetched_at TEXT,
+    UNIQUE(canonical_name, github_login),
+    FOREIGN KEY (canonical_name) REFERENCES tools(canonical_name)
+);
+
 -- API response cache
 CREATE TABLE IF NOT EXISTS api_cache (
     cache_key TEXT PRIMARY KEY,
@@ -135,9 +157,36 @@ def get_conn() -> sqlite3.Connection:
     return conn
 
 
+def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return {str(row["name"]) for row in rows}
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl: str) -> None:
+    cols = _table_columns(conn, table)
+    if column not in cols:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
+
+
+def run_migrations(conn: sqlite3.Connection) -> None:
+    _ensure_column(
+        conn,
+        "tool_repos",
+        "is_enterprise_repo",
+        "is_enterprise_repo INTEGER DEFAULT 0",
+    )
+    _ensure_column(
+        conn,
+        "tool_snapshots",
+        "enterprise_repo_count",
+        "enterprise_repo_count INTEGER DEFAULT 0",
+    )
+
+
 def init_db() -> None:
     with get_conn() as conn:
         conn.executescript(_SCHEMA_SQL)
+        run_migrations(conn)
         conn.commit()
 
 
@@ -219,4 +268,5 @@ __all__ = [
     "get_conn",
     "init_db",
     "is_cached",
+    "run_migrations",
 ]
