@@ -1,4 +1,6 @@
 .env
-data/
+.env.save
 __pycache__/
 *.pyc
+data/*
+!data/uth.db
