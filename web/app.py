@@ -10,6 +10,7 @@ from web.data import (
     get_all_tools,
     get_category_tools,
     get_pre_commercial_signal,
+    get_radar_snapshot,
     get_radar_tools,
     get_summary_stats,
     get_tool_detail,
@@ -290,7 +291,8 @@ def radar():
     if not db_has_data():
         return render_template("empty.html", page_title="The Radar")
 
-    tools = get_radar_tools()
+    radar_snapshot = get_radar_snapshot()
+    tools = radar_snapshot["tools"]
     for tool in tools:
         contributors = get_tool_contributors(tool["canonical_name"])
         top_builders = []
@@ -321,7 +323,9 @@ def radar():
         tools=tools,
         radar_count=len(tools),
         radar_max_repos=400,
-        radar_min_growth_pct=20,
+        radar_min_growth_pct=int(round(float(radar_snapshot["growth_threshold"]) * 100)),
+        radar_target_growth_pct=int(round(float(radar_snapshot["target_growth_threshold"]) * 100)),
+        radar_fallback_growth_pct=int(round(float(radar_snapshot["fallback_growth_threshold"]) * 100)),
     )
 
 

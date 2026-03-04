@@ -11,6 +11,12 @@
     {{ radar_min_growth_pct }}% of those repos were created in the last 90 days. That combination
     of small base + fast growth is historically where the most interesting infrastructure companies get found earliest.
   </p>
+  {% if radar_min_growth_pct < radar_target_growth_pct %}
+  <p class="small-note">
+    No tools met the strict {{ radar_target_growth_pct }}% growth threshold today, so Radar auto-expanded to
+    {{ radar_fallback_growth_pct }}% to keep the early-signal window visible.
+  </p>
+  {% endif %}
 </section>
 
 {% if tools %}

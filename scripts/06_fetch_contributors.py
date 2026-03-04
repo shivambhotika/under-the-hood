@@ -6,6 +6,7 @@ Uses GitHub Contributors API + Users API.
 Run after 04_compute_scores.py.
 """
 
+import os
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -25,7 +26,7 @@ HEADERS = {
     "User-Agent": "under-the-hood-contributors",
 }
 REQUEST_SLEEP_SECONDS = 1.5
-TOP_TOOLS_LIMIT = 35
+TOP_TOOLS_LIMIT = int(os.getenv("CONTRIB_TOP_LIMIT", "35"))
 TOP_CONTRIBUTORS_PER_TOOL = 10
 
 
@@ -155,17 +156,32 @@ def main() -> None:
             return
 
         tools = conn.execute(
-            """
-            SELECT t.canonical_name, t.github_repo, s.emergence_score
-            FROM tool_snapshots s
-            JOIN tools t ON t.canonical_name = s.canonical_name
-            WHERE s.snapshot_date = ?
-              AND t.github_repo IS NOT NULL
-              AND TRIM(t.github_repo) != ''
-            ORDER BY s.emergence_score DESC
-            LIMIT ?
-            """,
-            (snapshot_date, TOP_TOOLS_LIMIT),
+            (
+                """
+                SELECT t.canonical_name, t.github_repo, s.emergence_score, s.total_repos
+                FROM tool_snapshots s
+                JOIN tools t ON t.canonical_name = s.canonical_name
+                WHERE s.snapshot_date = ?
+                  AND t.github_repo IS NOT NULL
+                  AND TRIM(t.github_repo) != ''
+                  AND COALESCE(s.total_repos, 0) > 0
+                ORDER BY s.emergence_score DESC
+                LIMIT ?
+                """
+                if TOP_TOOLS_LIMIT > 0
+                else
+                """
+                SELECT t.canonical_name, t.github_repo, s.emergence_score, s.total_repos
+                FROM tool_snapshots s
+                JOIN tools t ON t.canonical_name = s.canonical_name
+                WHERE s.snapshot_date = ?
+                  AND t.github_repo IS NOT NULL
+                  AND TRIM(t.github_repo) != ''
+                  AND COALESCE(s.total_repos, 0) > 0
+                ORDER BY s.emergence_score DESC
+                """
+            ),
+            ((snapshot_date, TOP_TOOLS_LIMIT) if TOP_TOOLS_LIMIT > 0 else (snapshot_date,)),
         ).fetchall()
 
         total = len(tools)

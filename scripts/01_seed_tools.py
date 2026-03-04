@@ -67,7 +67,7 @@ SEED_TOOLS = [
     # AI / ML
     ("langchain", "LangChain", "pypi", "AI/ML", "Framework for building LLM-powered applications", "langchain-ai/langchain"),
     ("openai", "OpenAI SDK", "pypi", "AI/ML", "Official Python client for the OpenAI API", "openai/openai-python"),
-    ("anthropic", "Anthropic SDK", "pypi", "AI/ML", "Official Python client for the Anthropic API", "anthropic/anthropic-sdk-python"),
+    ("anthropic", "Anthropic SDK", "pypi", "AI/ML", "Official Python client for the Anthropic API", "anthropics/anthropic-sdk-python"),
     ("transformers", "Transformers", "pypi", "AI/ML", "HuggingFace library for pretrained models", "huggingface/transformers"),
     ("pydantic-ai", "PydanticAI", "pypi", "AI/ML", "Agent framework built on Pydantic by the Pydantic team", "pydantic/pydantic-ai"),
     ("litellm", "LiteLLM", "pypi", "AI/ML", "Call any LLM API with one unified interface", "BerriAI/litellm"),

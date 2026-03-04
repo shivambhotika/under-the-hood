@@ -15,7 +15,8 @@ except ModuleNotFoundError:
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "uth.db"
 RADAR_MAX_REPOS = 400
-RADAR_MIN_GROWTH_RATIO = 0.20
+RADAR_TARGET_GROWTH_RATIO = 0.20
+RADAR_FALLBACK_GROWTH_RATIO = 0.15
 RADAR_MIN_TOTAL_REPOS = 8
 
 NOTABLE_INSTITUTIONS = {
@@ -337,39 +338,52 @@ def get_pre_commercial_signal(
     return True
 
 
+def _query_radar_rows(conn: sqlite3.Connection, snapshot_date: str, growth_ratio: float) -> list[sqlite3.Row]:
+    return conn.execute(
+        """
+        SELECT
+            t.canonical_name,
+            t.display_name,
+            t.ecosystem,
+            t.category,
+            t.description,
+            t.github_repo,
+            COALESCE(s.total_repos, 0) AS total_repos,
+            COALESCE(s.new_repos_90d, 0) AS new_repos_90d,
+            COALESCE(s.active_repos, 0) AS active_repos,
+            COALESCE(s.emergence_score, 0) AS emergence_score,
+            COALESCE(s.enterprise_repo_count, 0) AS enterprise_repo_count
+        FROM tools t
+        JOIN tool_snapshots s ON s.canonical_name = t.canonical_name
+        WHERE s.snapshot_date = ?
+          AND s.total_repos >= ?
+          AND s.total_repos <= ?
+          AND (
+            (1.0 * COALESCE(s.new_repos_90d, 0)) /
+            CASE WHEN COALESCE(s.total_repos, 0) <= 0 THEN 1 ELSE s.total_repos END
+          ) >= ?
+        ORDER BY s.emergence_score DESC, s.total_repos DESC
+        """,
+        (snapshot_date, RADAR_MIN_TOTAL_REPOS, RADAR_MAX_REPOS, growth_ratio),
+    ).fetchall()
+
+
 @ttl_cache(3600)
-def get_radar_tools() -> list[dict[str, Any]]:
+def get_radar_snapshot() -> dict[str, Any]:
     snap = latest_snapshot_date()
     if not snap:
-        return []
+        return {
+            "tools": [],
+            "growth_threshold": RADAR_TARGET_GROWTH_RATIO,
+            "target_growth_threshold": RADAR_TARGET_GROWTH_RATIO,
+            "fallback_growth_threshold": RADAR_FALLBACK_GROWTH_RATIO,
+        }
     with _conn() as conn:
-        rows = conn.execute(
-            """
-            SELECT
-                t.canonical_name,
-                t.display_name,
-                t.ecosystem,
-                t.category,
-                t.description,
-                t.github_repo,
-                COALESCE(s.total_repos, 0) AS total_repos,
-                COALESCE(s.new_repos_90d, 0) AS new_repos_90d,
-                COALESCE(s.active_repos, 0) AS active_repos,
-                COALESCE(s.emergence_score, 0) AS emergence_score,
-                COALESCE(s.enterprise_repo_count, 0) AS enterprise_repo_count
-            FROM tools t
-            JOIN tool_snapshots s ON s.canonical_name = t.canonical_name
-            WHERE s.snapshot_date = ?
-              AND s.total_repos >= ?
-              AND s.total_repos <= ?
-              AND (
-                (1.0 * COALESCE(s.new_repos_90d, 0)) /
-                CASE WHEN COALESCE(s.total_repos, 0) <= 0 THEN 1 ELSE s.total_repos END
-              ) >= ?
-            ORDER BY s.emergence_score DESC, s.total_repos DESC
-            """,
-            (snap, RADAR_MIN_TOTAL_REPOS, RADAR_MAX_REPOS, RADAR_MIN_GROWTH_RATIO),
-        ).fetchall()
+        rows = _query_radar_rows(conn, snap, RADAR_TARGET_GROWTH_RATIO)
+        used_growth = RADAR_TARGET_GROWTH_RATIO
+        if not rows:
+            rows = _query_radar_rows(conn, snap, RADAR_FALLBACK_GROWTH_RATIO)
+            used_growth = RADAR_FALLBACK_GROWTH_RATIO
 
     result = _row_dicts(rows)
     for row in result:
@@ -379,7 +393,16 @@ def get_radar_tools() -> list[dict[str, Any]]:
         row["pre_commercial_signal"] = get_pre_commercial_signal(
             row.get("canonical_name"), row.get("github_repo")
         )
-    return result
+    return {
+        "tools": result,
+        "growth_threshold": used_growth,
+        "target_growth_threshold": RADAR_TARGET_GROWTH_RATIO,
+        "fallback_growth_threshold": RADAR_FALLBACK_GROWTH_RATIO,
+    }
+
+
+def get_radar_tools() -> list[dict[str, Any]]:
+    return get_radar_snapshot()["tools"]
 
 
 def signal_label(emergence_score: float, total_repos: int) -> tuple[str, str, str]:
