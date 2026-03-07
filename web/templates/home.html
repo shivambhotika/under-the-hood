@@ -1,8 +1,9 @@
 {% extends "base.html" %}
+{% from "macros.html" import confidence_badge %}
 {% block content %}
 <section>
   <h1>What the open source world is actually building.</h1>
-  <p class="subtitle">Tracking <strong>{{ "{:,}".format(stats.total_tools) }} tools</strong> across <strong>{{ "{:,}".format(stats.total_repos) }} repositories</strong>. Ground-truth adoption data from real code — not surveys, not social media. Updated daily.</p>
+  <p class="subtitle">Tracking <strong>{{ "{:,}".format(stats.total_tools) }} tools</strong> across <strong>{{ "{:,}".format(stats.total_repos) }} repositories</strong>. Ground-truth adoption data from real code — not surveys, not social media. Updated weekly.</p>
 </section>
 
 <section class="cards three">
@@ -41,6 +42,10 @@
         <li>New (90d): <strong>{{ "{:,}".format(m.new_repos_90d|int) }}</strong> <span>(new repositories that started using it recently)</span></li>
         <li>Activity: <strong>{{ "%.0f"|format(m.activity_pct) }}%</strong> <span>(share of using repositories updated in the last 30 days)</span></li>
       </ul>
+      <div class="small-note confidence-line">{{ confidence_badge(m.confidence_tier, m.sample_size) }}</div>
+      {% if m.low_confidence %}
+      <div class="small-note low-confidence-note">Low confidence — directional only.</div>
+      {% endif %}
       <div class="small-note">{{ m.signal_explainer }} (signal interpretation)</div>
     </article>
     {% endfor %}
@@ -50,19 +55,19 @@
 <section class="radar-banner">
   <div class="radar-banner-title">🔭 The Radar — {{ radar_count }} tools in the pre-commercial window</div>
   <div class="radar-banner-sub">Tools small enough to still be early, growing fast enough to be a signal.</div>
-  <a class="radar-banner-link" href="{{ url_for('radar') }}">View The Radar →</a>
+  <a class="radar-banner-link radar-cta" href="{{ url_for('radar') }}">View The Radar →</a>
 </section>
 
 <section>
   <h2>State of each category</h2>
   <p class="subtitle">A category is a group of tools that solve the same problem. Is there a clear winner or is it still anyone's game?</p>
-  <div class="cards three">
+  <div class="cards three category-grid">
     {% for c in categories %}
     {% set ru = category_runner_ups[c.category] %}
     <article class="card">
       <h3>{{ c.category }}</h3>
       <span class="phase-badge">{{ c.market_phase }}</span>
-      <div class="sub" style="margin-top: 10px">{{ phase_short_label(c.market_phase) }} (competitive state)</div>
+      <div class="sub category-phase-sub">{{ phase_short_label(c.market_phase) }}</div>
       <hr>
       <ul class="metric-list">
         <li>Top tool: <strong>{{ c.top_tool }}</strong> <span>({{ "%.0f"|format(c.top_tool_share_pct|float) }}% of repos in this category)</span></li>

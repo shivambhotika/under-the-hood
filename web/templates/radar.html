@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros.html" import confidence_badge %}
 {% block content %}
 <section>
   <h1>🔭 The Radar</h1>
@@ -32,12 +33,14 @@
     </div>
 
     <h2>{{ t.display_name }}</h2>
+    <div class="small-note confidence-line">{{ confidence_badge(t.confidence_tier, t.sample_size) }}</div>
     <p>{{ t.description }}</p>
 
     <hr>
     <ul class="metric-list">
       <li>Repos using it: <strong>{{ "{:,}".format(t.total_repos|int) }}</strong> <span>(still under {{ radar_max_repos }})</span></li>
       <li>New in 90 days: <strong>{{ "{:,}".format(t.new_repos_90d|int) }}</strong> <span>({{ "%.0f"|format((t.growth_ratio|float) * 100) }}% of base)</span></li>
+      <li>Weekly downloads: <strong>{% if t.downloads_source %}{{ format_compact(t.weekly_downloads|int) }} ({{ t.downloads_source }}){% else %}—{% endif %}</strong></li>
       <li>Enterprise orgs: <strong>{% if t.enterprise_repo_count|int > 0 %}{{ t.enterprise_repo_count|int }} detected{% else %}None yet{% endif %}</strong></li>
       <li>Emergence score: <strong>{{ "%.2f"|format(t.emergence_score|float) }}</strong></li>
     </ul>
@@ -54,7 +57,7 @@
     </div>
     {% endif %}
 
-    <a class="radar-banner-link" href="{{ url_for('tool_detail', name=t.canonical_name) }}">View Full Analysis →</a>
+    <a class="radar-banner-link radar-card-link" href="{{ url_for('tool_detail', name=t.canonical_name) }}">View Full Analysis →</a>
   </article>
   {% endfor %}
 </section>

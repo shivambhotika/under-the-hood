@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros.html" import confidence_badge %}
 {% block content %}
 <section>
   <h1>Category Intelligence</h1>
@@ -17,7 +18,7 @@
 <section>
   <h2>{{ cat.category }}</h2>
   <span class="phase-badge">{{ cat.market_phase }}</span>
-  <p class="subtitle">{{ phase_explainer(cat.market_phase) }} (what this phase means for decision-makers).</p>
+  <p class="subtitle">{{ phase_explainer(cat.market_phase) }}</p>
 </section>
 
 <section class="cards three">
@@ -52,7 +53,7 @@
 
 <section>
   <h2>All tools in this category, compared</h2>
-  <div class="table-wrap">
+  <div class="table-wrap desktop-table">
     <table>
       <thead>
         <tr>
@@ -61,6 +62,7 @@
           <th>New (90d)</th>
           <th>Still Active</th>
           <th>Enterprise</th>
+          <th>Downloads</th>
           <th>Signal</th>
           <th>What it is</th>
         </tr>
@@ -68,17 +70,38 @@
       <tbody>
         {% for r in rows %}
         <tr class="{{ r.row_class }}">
-          <td>{{ r.tool }}</td>
+          <td>{{ r.tool }} {{ confidence_badge(r.confidence_tier, r.sample_size) }}</td>
           <td>{{ r.used_in }}</td>
           <td>{{ r.new_90d }}</td>
           <td>{{ r.active }}</td>
           <td>{% if r.enterprise > 0 %}{{ r.enterprise }} orgs{% else %}—{% endif %}</td>
+          <td>{% if r.downloads_source %}{{ format_compact(r.weekly_downloads|int) }} / week ({{ r.downloads_source }}){% else %}—{% endif %}</td>
           <td>{{ r.signal }}</td>
           <td>{{ r.what }}</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
+  </div>
+
+  <div class="mobile-tool-cards">
+    {% for r in rows %}
+    <article class="card mobile-tool-card {{ r.row_class }}">
+      <div class="mobile-tool-head">
+        <h3>{{ r.tool }}</h3>
+        <span class="pill">{{ r.signal_text }}</span>
+      </div>
+      <div class="small-note">{{ confidence_badge(r.confidence_tier, r.sample_size) }}</div>
+      <ul class="metric-list">
+        <li>Used in: <strong>{{ "{:,}".format(r.used_in_raw|int) }} repos</strong></li>
+        <li>New (90d): <strong>{{ "{:,}".format(r.new_90d_raw|int) }}</strong></li>
+        <li>Still active: <strong>{{ "%.0f"|format(r.active_pct_raw) }}%</strong></li>
+        <li>Enterprise: <strong>{% if r.enterprise > 0 %}{{ r.enterprise }} orgs{% else %}—{% endif %}</strong></li>
+        <li>Downloads: <strong>{% if r.downloads_source %}{{ format_compact(r.weekly_downloads|int) }} ({{ r.downloads_source }}){% else %}—{% endif %}</strong></li>
+        <li>What it is: <strong>{{ r.what }}</strong></li>
+      </ul>
+    </article>
+    {% endfor %}
   </div>
 </section>
 {% endblock %}

@@ -57,7 +57,7 @@ def market_phase(frag_index: float, top_share_pct: float, avg_emergence: float) 
         return "Consolidating", "A winner is emerging. Others are losing ground."
     if frag_index > 0.65 and avg_emergence < 10:
         return "Fragmenting", "Many tools exist but none are gaining momentum."
-    return "In Transition", "The market is shifting. Watch the top 2-3 tools closely."
+    return "In Transition", "Something is shifting here. The current leader may not hold."
 
 
 def fragmentation_plain_label(frag: float) -> str:
@@ -102,9 +102,35 @@ def generate_insight(
             "This sometimes signals an unsolved problem - or a category where developers prefer building their own solution."
         )
     return (
-        f"{category} is in transition. {top_tool} currently leads at {top_pct:.0f}% but the landscape is shifting. "
-        "Worth monitoring over the next 90 days."
+        f"{top_tool} is the current default in {category} at {top_pct:.0f}% share, but the category is not settled. "
+        f"{second_tool} is still close enough to challenge leadership, and the next 90 days will likely decide whether this market consolidates or re-opens."
     )
+
+
+def compute_confidence_tier(
+    total_repos: int, snapshot_count: int, metadata_coverage_pct: float = 100.0
+) -> str:
+    """
+    High:   50+ repos AND 4+ weekly snapshots
+    Medium: 15-49 repos OR (50+ repos but fewer than 4 snapshots)
+    Low:    under 15 repos
+    Always Low if metadata_coverage_pct < 60
+    """
+    if metadata_coverage_pct < 60:
+        return "Low"
+    if total_repos >= 50 and snapshot_count >= 4:
+        return "High"
+    if total_repos >= 15:
+        return "Medium"
+    return "Low"
+
+
+def compute_is_trend_reliable(canonical_name: str, conn) -> int:
+    count = conn.execute(
+        "SELECT COUNT(*) AS cnt FROM tool_snapshots WHERE canonical_name = ?",
+        (canonical_name,),
+    ).fetchone()["cnt"]
+    return 1 if int(count or 0) >= 4 else 0
 
 
 def recompute_today_snapshot(conn, canonical_name: str, snapshot_date: str) -> None:
@@ -158,19 +184,53 @@ def recompute_today_snapshot(conn, canonical_name: str, snapshot_date: str) -> N
         (canonical_name,),
     ).fetchone()["cnt"]
 
+    metadata_coverage_row = conn.execute(
+        """
+        SELECT
+          COUNT(DISTINCT repo_full_name) AS total_cnt,
+          COUNT(DISTINCT CASE WHEN pushed_at IS NOT NULL OR created_at IS NOT NULL THEN repo_full_name END) AS covered_cnt
+        FROM tool_repos
+        WHERE canonical_name = ? AND stars > 0
+        """,
+        (canonical_name,),
+    ).fetchone()
+    total_cnt = int(metadata_coverage_row["total_cnt"] or 0)
+    covered_cnt = int(metadata_coverage_row["covered_cnt"] or 0)
+    metadata_coverage_pct = (covered_cnt / max(1, total_cnt)) * 100.0 if total_cnt else 0.0
+
+    existing_snapshot = conn.execute(
+        """
+        SELECT COUNT(*) AS cnt
+        FROM tool_snapshots
+        WHERE canonical_name = ? AND snapshot_date = ?
+        """,
+        (canonical_name, snapshot_date),
+    ).fetchone()["cnt"]
+    snapshot_count = conn.execute(
+        "SELECT COUNT(*) AS cnt FROM tool_snapshots WHERE canonical_name = ?",
+        (canonical_name,),
+    ).fetchone()["cnt"]
+    projected_snapshots = int(snapshot_count or 0) + (0 if int(existing_snapshot or 0) > 0 else 1)
+    tier = compute_confidence_tier(int(total), projected_snapshots, metadata_coverage_pct)
+    is_reliable = 1 if projected_snapshots >= 4 else 0
+
     conn.execute(
         """
         INSERT INTO tool_snapshots (
             canonical_name, snapshot_date, total_repos, active_repos,
-            new_repos_90d, stars_median, emergence_score, enterprise_repo_count
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            new_repos_90d, stars_median, emergence_score, enterprise_repo_count,
+            sample_size, confidence_tier, is_trend_reliable
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(canonical_name, snapshot_date) DO UPDATE SET
             total_repos=excluded.total_repos,
             active_repos=excluded.active_repos,
             new_repos_90d=excluded.new_repos_90d,
             stars_median=excluded.stars_median,
             emergence_score=excluded.emergence_score,
-            enterprise_repo_count=excluded.enterprise_repo_count
+            enterprise_repo_count=excluded.enterprise_repo_count,
+            sample_size=excluded.sample_size,
+            confidence_tier=excluded.confidence_tier,
+            is_trend_reliable=excluded.is_trend_reliable
         """,
         (
             canonical_name,
@@ -181,7 +241,19 @@ def recompute_today_snapshot(conn, canonical_name: str, snapshot_date: str) -> N
             round(star_med, 2),
             emergence,
             int(enterprise_repo_count or 0),
+            int(total),
+            tier,
+            int(is_reliable),
         ),
+    )
+    reliable_now = compute_is_trend_reliable(canonical_name, conn)
+    conn.execute(
+        """
+        UPDATE tool_snapshots
+        SET is_trend_reliable = ?
+        WHERE canonical_name = ? AND snapshot_date = ?
+        """,
+        (int(reliable_now), canonical_name, snapshot_date),
     )
 
 

@@ -23,14 +23,33 @@
       </nav>
       <div class="sidebar-footer">
         Data: GitHub API<br>
-        Updated: Daily<br>
+        Updated: Weekly<br>
         Repos tracked: 500+ stars
       </div>
     </aside>
 
     <main class="content">
+      <a class="mobile-learn-link" href="{{ url_for('learn') }}" aria-label="How to read this">?</a>
       {% block content %}{% endblock %}
     </main>
   </div>
+  <nav class="mobile-tabbar" aria-label="Primary navigation">
+    <a href="{{ url_for('home') }}" class="mobile-tab {% if request.path == '/' %}active{% endif %}">
+      <span class="mobile-tab-icon">🏠</span>
+      <span class="mobile-tab-label">Home</span>
+    </a>
+    <a href="{{ url_for('tool_detail') }}" class="mobile-tab {% if request.path == '/tool' %}active{% endif %}">
+      <span class="mobile-tab-icon">🔍</span>
+      <span class="mobile-tab-label">Tools</span>
+    </a>
+    <a href="{{ url_for('category_view') }}" class="mobile-tab {% if request.path == '/category' %}active{% endif %}">
+      <span class="mobile-tab-icon">📦</span>
+      <span class="mobile-tab-label">Categories</span>
+    </a>
+    <a href="{{ url_for('radar') }}" class="mobile-tab {% if request.path == '/radar' %}active{% endif %}">
+      <span class="mobile-tab-icon">🔭</span>
+      <span class="mobile-tab-label">Radar</span>
+    </a>
+  </nav>
 </body>
 </html>

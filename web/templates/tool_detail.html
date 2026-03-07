@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros.html" import confidence_badge, trend_badge %}
 {% block content %}
 <section>
   <h1>Tool Deep Dive</h1>
@@ -33,17 +34,51 @@
     <div class="label">Projects using it</div>
     <div class="value">{{ "{:,}".format(tool.total_repos|int) }}</div>
     <div class="sub">(public repos with 500+ stars that list this dependency)</div>
+    <div class="small-note confidence-line">{{ confidence_badge(confidence_tier, sample_size) }}</div>
   </article>
   <article class="card">
     <div class="label">New adopters (90 days)</div>
     <div class="value">{{ "{:,}".format(tool.new_repos_90d|int) }}</div>
     <div class="sub">(repos that started using it recently)</div>
+    <div class="small-note confidence-line">{{ confidence_badge(confidence_tier, sample_size) }}</div>
   </article>
   <article class="card">
     <div class="label">Still actively used</div>
     <div class="value">{{ "{:,}".format(tool.active_repos|int) }}</div>
     <div class="sub">({{ "%.0f"|format(active_pct) }}% of using repos were updated in the last 30 days)</div>
+    <div class="small-note confidence-line">{{ confidence_badge(confidence_tier, sample_size) }}</div>
   </article>
+</section>
+
+<section class="usage-signals">
+  <h2>Usage Signals</h2>
+  <p class="subtitle">
+    Two ways to measure usage. Code integration shows what teams install in code.
+    Downloads show what is being pulled from registries.
+  </p>
+  <div class="columns two usage-columns">
+    <article class="card">
+      <div class="label">Weekly downloads</div>
+      {% if has_downloads %}
+      <div class="value">{{ format_compact(weekly_downloads|int) }} / week</div>
+      <div class="sub">({{ downloads_source }} registry, last 7 days)</div>
+      {% elif usage_model == "standalone_first" %}
+      <div class="value">—</div>
+      <div class="sub">This tool runs primarily as a standalone service/CLI, so registry download counts are not the primary signal.</div>
+      {% else %}
+      <div class="value">—</div>
+      <div class="sub">Download data not yet collected. Run scripts/05_fetch_downloads.py</div>
+      {% endif %}
+    </article>
+    <article class="card">
+      <div class="label">Code integration</div>
+      <div class="value">{{ "{:,}".format(tool.total_repos|int) }} repos</div>
+      <div class="sub">(GitHub dependency files in public projects with 500+ stars)</div>
+    </article>
+  </div>
+  <p class="small-note">
+    Download counts come from npm and PyPI registries and represent the last 7 days. They include automated CI/CD pipelines and mirrors, so raw numbers run higher than actual developer usage. Use directionally.
+  </p>
 </section>
 
 <section class="builder-section">
@@ -128,7 +163,11 @@
 {% if trend_chart_html %}
 <section>
   <h2>Adoption over time</h2>
-  <p class="subtitle">Each point is a daily snapshot of how many repos are using this tool (daily adoption count).</p>
+  <p class="subtitle">Each point is a weekly snapshot of how many repos are using this tool.</p>
+  <div class="small-note trend-note">{{ trend_badge(trend_reliable) }}</div>
+  {% if not trend_reliable %}
+  <div class="small-note">Trend building — fewer than 4 weekly snapshots collected. Check back next week for a more reliable curve.</div>
+  {% endif %}
   {{ trend_chart_html|safe }}
 </section>
 {% endif %}

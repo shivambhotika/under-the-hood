@@ -166,6 +166,45 @@ ALIASES = {
     "openai_agents": "openai-agents",
 }
 
+STANDALONE_FIRST_TOOLS = {
+    "ollama",
+    "docker",
+    "conda",
+    "uv",
+}
+
+MIXED_TOOLS = {
+    "sentry-sdk",
+    "logfire",
+    "langfuse",
+    "langsmith",
+}
+
+PACKAGE_NAMES = {
+    # canonical_name: (npm_package, pypi_package)
+    "shadcn-ui": ("shadcn", None),
+    "@mui/material": ("@mui/material", None),
+    "@radix-ui/react-primitive": ("@radix-ui/react-primitive", None),
+    "@reduxjs/toolkit": ("@reduxjs/toolkit", None),
+    "@trpc/server": ("@trpc/server", None),
+    "@nestjs/core": ("@nestjs/core", None),
+    "@biomejs/biome": ("@biomejs/biome", None),
+    "drizzle-orm": ("drizzle-orm", None),
+    "pydantic-ai": (None, "pydantic-ai"),
+    "llama-index": (None, "llama-index"),
+    "langchain": (None, "langchain"),
+    "langgraph": (None, "langgraph"),
+    "crewai": (None, "crewai"),
+    "sentry-sdk": (None, "sentry-sdk"),
+    "apache-airflow": (None, "apache-airflow"),
+    "qdrant-client": (None, "qdrant-client"),
+    "pinecone-client": (None, "pinecone-client"),
+    "weaviate-client": (None, "weaviate-client"),
+    "chromadb": (None, "chromadb"),
+    "pgvector": (None, "pgvector"),
+    "pytest-asyncio": (None, "pytest-asyncio"),
+}
+
 
 def main() -> None:
     init_db()
@@ -182,6 +221,34 @@ def main() -> None:
             "INSERT OR IGNORE INTO tool_aliases(alias, canonical_name) VALUES (?, ?)",
             list(ALIASES.items()),
         )
+
+        # Default usage model and package names from canonical slugs.
+        conn.execute(
+            "UPDATE tools SET usage_model = 'dependency_first' WHERE usage_model IS NULL OR usage_model = ''"
+        )
+        conn.execute(
+            "UPDATE tools SET npm_package = canonical_name WHERE ecosystem = 'npm' AND (npm_package IS NULL OR trim(npm_package) = '')"
+        )
+        conn.execute(
+            "UPDATE tools SET pypi_package = canonical_name WHERE ecosystem = 'pypi' AND (pypi_package IS NULL OR trim(pypi_package) = '')"
+        )
+
+        for tool in STANDALONE_FIRST_TOOLS:
+            conn.execute(
+                "UPDATE tools SET usage_model = 'standalone_first' WHERE canonical_name = ?",
+                (tool,),
+            )
+        for tool in MIXED_TOOLS:
+            conn.execute(
+                "UPDATE tools SET usage_model = 'mixed' WHERE canonical_name = ?",
+                (tool,),
+            )
+
+        for canonical, (npm_pkg, pypi_pkg) in PACKAGE_NAMES.items():
+            conn.execute(
+                "UPDATE tools SET npm_package = ?, pypi_package = ? WHERE canonical_name = ?",
+                (npm_pkg, pypi_pkg, canonical),
+            )
         conn.commit()
 
         category_rows = conn.execute(
@@ -194,6 +261,7 @@ def main() -> None:
     print("---------|------")
     for row in category_rows:
         print(f"{row['category']} | {row['cnt']}")
+    print("  -> Usage models updated")
 
 
 if __name__ == "__main__":

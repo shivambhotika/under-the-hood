@@ -10,14 +10,17 @@ import numpy as np
 
 try:
     from scripts.enterprise_orgs import ENTERPRISE_ORGS
+    from scripts.db import init_db
 except ModuleNotFoundError:
     from enterprise_orgs import ENTERPRISE_ORGS
+    from db import init_db
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "uth.db"
 RADAR_MAX_REPOS = 400
 RADAR_TARGET_GROWTH_RATIO = 0.20
 RADAR_FALLBACK_GROWTH_RATIO = 0.15
 RADAR_MIN_TOTAL_REPOS = 8
+_SCHEMA_READY = False
 
 NOTABLE_INSTITUTIONS = {
     "mit",
@@ -67,6 +70,10 @@ def ttl_cache(seconds: int = 3600) -> Callable:
 
 
 def _conn() -> sqlite3.Connection:
+    global _SCHEMA_READY
+    if not _SCHEMA_READY:
+        init_db()
+        _SCHEMA_READY = True
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
@@ -150,12 +157,18 @@ def get_all_tools(ecosystem: str | None = None, category: str | None = None) -> 
         query = """
             SELECT
                 t.canonical_name, t.display_name, t.ecosystem, t.category, t.description, t.github_repo,
+                COALESCE(t.usage_model, 'dependency_first') AS usage_model,
                 COALESCE(s.total_repos, 0) AS total_repos,
                 COALESCE(s.active_repos, 0) AS active_repos,
                 COALESCE(s.new_repos_90d, 0) AS new_repos_90d,
                 COALESCE(s.emergence_score, 0) AS emergence_score,
                 COALESCE(s.stars_median, 0) AS stars_median,
-                COALESCE(s.enterprise_repo_count, 0) AS enterprise_repo_count
+                COALESCE(s.enterprise_repo_count, 0) AS enterprise_repo_count,
+                COALESCE(s.weekly_downloads, 0) AS weekly_downloads,
+                s.downloads_source AS downloads_source,
+                COALESCE(s.sample_size, 0) AS sample_size,
+                COALESCE(s.confidence_tier, 'Low') AS confidence_tier,
+                COALESCE(s.is_trend_reliable, 0) AS is_trend_reliable
             FROM tools t
             LEFT JOIN tool_snapshots s
               ON s.canonical_name = t.canonical_name
@@ -183,7 +196,11 @@ def get_top_movers(n: int = 6) -> list[dict[str, Any]]:
         rows = conn.execute(
             """
             SELECT t.canonical_name, t.display_name, t.ecosystem, t.category, t.description,
-                   s.total_repos, s.new_repos_90d, s.emergence_score, s.active_repos
+                   s.total_repos, s.new_repos_90d, s.emergence_score, s.active_repos,
+                   COALESCE(s.sample_size, 0) AS sample_size,
+                   COALESCE(s.confidence_tier, 'Low') AS confidence_tier,
+                   COALESCE(s.weekly_downloads, 0) AS weekly_downloads,
+                   s.downloads_source
             FROM tools t
             JOIN tool_snapshots s ON s.canonical_name = t.canonical_name
             WHERE s.snapshot_date = ? AND s.total_repos > 10
@@ -206,13 +223,18 @@ def get_tool_detail(canonical_name: str) -> dict[str, Any] | None:
             """
             SELECT
                 t.canonical_name, t.display_name, t.ecosystem, t.category,
-                t.description, t.github_repo,
+                t.description, t.github_repo, COALESCE(t.usage_model, 'dependency_first') AS usage_model,
                 COALESCE(s.total_repos, 0) AS total_repos,
                 COALESCE(s.active_repos, 0) AS active_repos,
                 COALESCE(s.new_repos_90d, 0) AS new_repos_90d,
                 COALESCE(s.emergence_score, 0) AS emergence_score,
                 COALESCE(s.stars_median, 0) AS stars_median,
-                COALESCE(s.enterprise_repo_count, 0) AS enterprise_repo_count
+                COALESCE(s.enterprise_repo_count, 0) AS enterprise_repo_count,
+                COALESCE(s.weekly_downloads, 0) AS weekly_downloads,
+                s.downloads_source AS downloads_source,
+                COALESCE(s.sample_size, 0) AS sample_size,
+                COALESCE(s.confidence_tier, 'Low') AS confidence_tier,
+                COALESCE(s.is_trend_reliable, 0) AS is_trend_reliable
             FROM tools t
             LEFT JOIN tool_snapshots s
               ON s.canonical_name = t.canonical_name
@@ -297,6 +319,22 @@ def get_category_tools(category: str) -> list[dict[str, Any]]:
 
 
 @ttl_cache(3600)
+def get_download_history(canonical_name: str) -> list[dict[str, Any]]:
+    with _conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT snapshot_date, weekly_downloads, source
+            FROM download_snapshots
+            WHERE canonical_name = ?
+            ORDER BY snapshot_date DESC
+            LIMIT 12
+            """,
+            (canonical_name,),
+        ).fetchall()
+    return _row_dicts(rows)
+
+
+@ttl_cache(3600)
 def get_tool_contributors(canonical_name: str) -> list[dict[str, Any]]:
     with _conn() as conn:
         rows = conn.execute(
@@ -352,7 +390,11 @@ def _query_radar_rows(conn: sqlite3.Connection, snapshot_date: str, growth_ratio
             COALESCE(s.new_repos_90d, 0) AS new_repos_90d,
             COALESCE(s.active_repos, 0) AS active_repos,
             COALESCE(s.emergence_score, 0) AS emergence_score,
-            COALESCE(s.enterprise_repo_count, 0) AS enterprise_repo_count
+            COALESCE(s.enterprise_repo_count, 0) AS enterprise_repo_count,
+            COALESCE(s.weekly_downloads, 0) AS weekly_downloads,
+            s.downloads_source AS downloads_source,
+            COALESCE(s.sample_size, 0) AS sample_size,
+            COALESCE(s.confidence_tier, 'Low') AS confidence_tier
         FROM tools t
         JOIN tool_snapshots s ON s.canonical_name = t.canonical_name
         WHERE s.snapshot_date = ?
@@ -425,7 +467,7 @@ def phase_explainer(phase: str) -> str:
         "Consolidating": "Like smartphones before iPhone vs Android settled: a winner is becoming clear.",
         "Early / Competing": "Like early social media: many players, no one has won yet.",
         "Fragmenting": "Lots of tools exist but developers cannot agree on any of them.",
-        "In Transition": "Something is changing. Yesterday's winner might not be tomorrow's.",
+        "In Transition": "Something is shifting here. The current leader may not hold.",
     }.get(phase, "")
 
 
@@ -441,29 +483,40 @@ def generate_tool_insight(tool_data: dict[str, Any]) -> str:
 
     if emergence > 40:
         momentum = (
-            f"{name} is in breakout growth: {new_90d:,} new projects adopted it in the last 90 days, "
-            f"which is {adoption_pct:.0f}% of its current base (share of users that are recent adopters)."
+            f"{name} is in a breakout phase. Adoption is compounding quickly from a smaller base, which is exactly where category leaders are often formed."
         )
     elif emergence > 15:
-        momentum = f"{name} is growing steadily, with {new_90d:,} new projects adopting it in the last 90 days (recent adoption momentum)."
+        momentum = (
+            f"{name} is consolidating real momentum. It is not just popular in conversation — it is getting installed in new production code."
+        )
     elif emergence < 5 and total > 500:
         momentum = (
-            f"{name} is widely used ({total:,} repos) but not gaining new adopters quickly. "
-            "It looks like established infrastructure rather than a fast-growth tool."
+            f"{name} already behaves like infrastructure. Growth is slower because it is mature, not because it is fading out."
         )
     else:
-        momentum = f"{name} has a stable user base of {total:,} repos (projects currently using it)."
+        momentum = (
+            f"{name} has a live, investable footprint but is still proving whether it can become a category default."
+        )
 
     if activity_pct > 70:
-        health = "Its user base is highly active: most projects using it were updated in the last 30 days (maintenance activity signal)."
+        health = "Its install base is actively maintained, which lowers durability risk."
     elif activity_pct > 40:
-        health = "Most projects using it are still actively maintained (updated within the last 30 days)."
+        health = "A meaningful share of adopters are still shipping updates, so usage appears healthy."
     else:
-        health = (
-            f"Only {activity_pct:.0f}% of using repos were updated in the last 30 days (maintenance activity signal). "
-            "That can mean stable long-lived projects, or reduced engagement."
-        )
-    return f"{momentum} {health}"
+        health = "Maintenance activity is weaker, so treat this as directional until another snapshot confirms momentum."
+    return (
+        f"{momentum} {name} is currently in {total:,} tracked repos with {new_90d:,} new adopters in the last 90 days "
+        f"({adoption_pct:.0f}% of its base). {health}"
+    )
+
+
+def confidence_badge_copy(tier: str, sample_size: int) -> str:
+    s = int(sample_size or 0)
+    if tier == "High":
+        return f"High confidence — based on {s} repos, reliable signal"
+    if tier == "Medium":
+        return f"Medium confidence — based on {s} repos, reasonably reliable and building history"
+    return f"Early signal — based on only {s} repos, directional only"
 
 
 def median_stars_for_tool(canonical_name: str) -> float:

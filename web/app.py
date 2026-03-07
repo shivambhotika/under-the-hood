@@ -4,11 +4,13 @@ import plotly.graph_objects as go
 from flask import Flask, redirect, render_template, request, url_for
 
 from web.data import (
+    confidence_badge_copy,
     db_has_data,
     generate_tool_insight,
     get_all_categories,
     get_all_tools,
     get_category_tools,
+    get_download_history,
     get_pre_commercial_signal,
     get_radar_snapshot,
     get_radar_tools,
@@ -54,7 +56,7 @@ def phase_short_label(phase: str) -> str:
         return "One tool has won"
     if phase == "Consolidating":
         return "A winner is emerging"
-    return "Still competing"
+    return "No clear winner yet — this is an active competition"
 
 
 @app.context_processor
@@ -104,6 +106,10 @@ def home():
         row["signal_color"] = color
         row["signal_explainer"] = explainer
         row["activity_pct"] = (int(row["active_repos"]) / max(1, int(row["total_repos"]))) * 100
+        row["confidence_tier"] = row.get("confidence_tier") or "Low"
+        row["sample_size"] = int(row.get("sample_size") or row.get("total_repos") or 0)
+        row["confidence_tooltip"] = confidence_badge_copy(row["confidence_tier"], row["sample_size"])
+        row["low_confidence"] = row["sample_size"] < 15 or row["confidence_tier"] == "Low"
 
     return render_template(
         "home.html",
@@ -142,6 +148,15 @@ def tool_detail():
 
     insight = generate_tool_insight(tool)
     active_pct = (int(tool["active_repos"]) / max(1, int(tool["total_repos"]))) * 100
+    sample_size = int(tool.get("sample_size") or tool.get("total_repos") or 0)
+    confidence_tier = tool.get("confidence_tier") or "Low"
+    confidence_tooltip = confidence_badge_copy(confidence_tier, sample_size)
+    trend_reliable = int(tool.get("is_trend_reliable") or 0) == 1
+    weekly_downloads = int(tool.get("weekly_downloads") or 0)
+    downloads_source = tool.get("downloads_source")
+    usage_model = tool.get("usage_model") or "dependency_first"
+    has_downloads = bool(downloads_source)
+    download_history = get_download_history(canonical)
 
     version_chart_html = ""
     if tool.get("version_spread"):
@@ -161,7 +176,11 @@ def tool_detail():
         )
         fig.update_layout(**plotly_defaults(), xaxis_title="Repos (projects on this version)", height=320)
         fig.update_yaxes(autorange="reversed")
-        version_chart_html = fig.to_html(full_html=False, include_plotlyjs="cdn", config={"displayModeBar": False})
+        version_chart_html = fig.to_html(
+            full_html=False,
+            include_plotlyjs="cdn",
+            config={"displayModeBar": False, "responsive": True},
+        )
 
     trend_chart_html = ""
     history = tool.get("history") or []
@@ -182,9 +201,13 @@ def tool_detail():
             **plotly_defaults(),
             xaxis_title="Snapshot date (day this measurement was recorded)",
             yaxis_title="Total repos (projects using this tool)",
-            height=360,
+            height=320,
         )
-        trend_chart_html = fig2.to_html(full_html=False, include_plotlyjs=False, config={"displayModeBar": False})
+        trend_chart_html = fig2.to_html(
+            full_html=False,
+            include_plotlyjs=False,
+            config={"displayModeBar": False, "responsive": True},
+        )
 
     return render_template(
         "tool_detail.html",
@@ -196,6 +219,15 @@ def tool_detail():
         pre_commercial_signal=pre_commercial_signal,
         insight=insight,
         active_pct=active_pct,
+        confidence_tier=confidence_tier,
+        confidence_tooltip=confidence_tooltip,
+        sample_size=sample_size,
+        trend_reliable=trend_reliable,
+        weekly_downloads=weekly_downloads,
+        downloads_source=downloads_source,
+        usage_model=usage_model,
+        has_downloads=has_downloads,
+        download_history=download_history,
         version_chart_html=version_chart_html,
         trend_chart_html=trend_chart_html,
     )
@@ -246,11 +278,16 @@ def category_view():
     bar_fig.update_layout(
         **plotly_defaults(),
         height=420,
+        margin=dict(l=120, r=20, t=30, b=20),
         xaxis_title="Total repos (projects using each tool)",
         yaxis_title="",
     )
     bar_fig.update_yaxes(autorange="reversed")
-    bar_html = bar_fig.to_html(full_html=False, include_plotlyjs="cdn", config={"displayModeBar": False})
+    bar_html = bar_fig.to_html(
+        full_html=False,
+        include_plotlyjs="cdn",
+        config={"displayModeBar": False, "responsive": True},
+    )
 
     rows = []
     for t in tools:
@@ -261,14 +298,26 @@ def category_view():
             row_class = "row-green"
         elif signal == "Fading":
             row_class = "row-red"
+        confidence_tier = t.get("confidence_tier") or "Low"
+        sample_size = int(t.get("sample_size") or t.get("total_repos") or 0)
+        confidence_tooltip = confidence_badge_copy(confidence_tier, sample_size)
         rows.append(
             {
                 "tool": t["display_name"],
+                "used_in_raw": int(t["total_repos"]),
                 "used_in": f"{int(t['total_repos']):,} (repos using this tool)",
+                "new_90d_raw": int(t["new_repos_90d"]),
                 "new_90d": f"{int(t['new_repos_90d']):,} (new adopters in last 90 days)",
+                "active_pct_raw": active_pct,
                 "active": f"{active_pct:.0f}% (share of using repos updated in last 30 days)",
                 "enterprise": int(t.get("enterprise_repo_count") or 0),
                 "signal": f"{signal} (momentum classification)",
+                "signal_text": signal,
+                "weekly_downloads": int(t.get("weekly_downloads") or 0),
+                "downloads_source": t.get("downloads_source"),
+                "confidence_tier": confidence_tier,
+                "confidence_tooltip": confidence_tooltip,
+                "sample_size": sample_size,
                 "what": (t["description"][:57] + "...") if len(t["description"]) > 60 else t["description"],
                 "row_class": row_class,
             }

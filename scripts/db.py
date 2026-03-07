@@ -25,6 +25,9 @@ CREATE TABLE IF NOT EXISTS tools (
     category TEXT NOT NULL,
     description TEXT,
     github_repo TEXT,
+    usage_model TEXT DEFAULT 'dependency_first',
+    npm_package TEXT,
+    pypi_package TEXT,
     created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -47,6 +50,11 @@ CREATE TABLE IF NOT EXISTS tool_snapshots (
     stars_median REAL DEFAULT 0,
     emergence_score REAL DEFAULT 0,
     enterprise_repo_count INTEGER DEFAULT 0,
+    weekly_downloads INTEGER DEFAULT 0,
+    downloads_source TEXT,
+    sample_size INTEGER DEFAULT 0,
+    confidence_tier TEXT DEFAULT 'Low',
+    is_trend_reliable INTEGER DEFAULT 0,
     UNIQUE(canonical_name, snapshot_date),
     FOREIGN KEY (canonical_name) REFERENCES tools(canonical_name)
 );
@@ -139,6 +147,18 @@ CREATE TABLE IF NOT EXISTS tool_contributors (
     FOREIGN KEY (canonical_name) REFERENCES tools(canonical_name)
 );
 
+-- Weekly downloads by registry for each tool snapshot
+CREATE TABLE IF NOT EXISTS download_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    canonical_name TEXT NOT NULL,
+    snapshot_date TEXT NOT NULL,
+    weekly_downloads INTEGER DEFAULT 0,
+    source TEXT NOT NULL,
+    fetched_at TEXT,
+    UNIQUE(canonical_name, snapshot_date),
+    FOREIGN KEY (canonical_name) REFERENCES tools(canonical_name)
+);
+
 -- API response cache
 CREATE TABLE IF NOT EXISTS api_cache (
     cache_key TEXT PRIMARY KEY,
@@ -180,6 +200,68 @@ def run_migrations(conn: sqlite3.Connection) -> None:
         "tool_snapshots",
         "enterprise_repo_count",
         "enterprise_repo_count INTEGER DEFAULT 0",
+    )
+    _ensure_column(
+        conn,
+        "tool_snapshots",
+        "weekly_downloads",
+        "weekly_downloads INTEGER DEFAULT 0",
+    )
+    _ensure_column(
+        conn,
+        "tool_snapshots",
+        "downloads_source",
+        "downloads_source TEXT",
+    )
+    _ensure_column(
+        conn,
+        "tool_snapshots",
+        "sample_size",
+        "sample_size INTEGER DEFAULT 0",
+    )
+    _ensure_column(
+        conn,
+        "tool_snapshots",
+        "confidence_tier",
+        "confidence_tier TEXT DEFAULT 'Low'",
+    )
+    _ensure_column(
+        conn,
+        "tool_snapshots",
+        "is_trend_reliable",
+        "is_trend_reliable INTEGER DEFAULT 0",
+    )
+    _ensure_column(
+        conn,
+        "tools",
+        "usage_model",
+        "usage_model TEXT DEFAULT 'dependency_first'",
+    )
+    _ensure_column(
+        conn,
+        "tools",
+        "npm_package",
+        "npm_package TEXT",
+    )
+    _ensure_column(
+        conn,
+        "tools",
+        "pypi_package",
+        "pypi_package TEXT",
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS download_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            canonical_name TEXT NOT NULL,
+            snapshot_date TEXT NOT NULL,
+            weekly_downloads INTEGER DEFAULT 0,
+            source TEXT NOT NULL,
+            fetched_at TEXT,
+            UNIQUE(canonical_name, snapshot_date),
+            FOREIGN KEY (canonical_name) REFERENCES tools(canonical_name)
+        )
+        """
     )
 
 
