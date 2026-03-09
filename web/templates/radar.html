@@ -18,6 +18,21 @@
     {{ radar_fallback_growth_pct }}% to keep the early-signal window visible.
   </p>
   {% endif %}
+
+  <details class="radar-signal-help">
+    <summary>How to read these signals</summary>
+    <p>
+      Last activity: How recently any project using this tool was updated.
+      Active builders is not the same as GitHub stars — it counts the people
+      actually committing code to the tool itself, not the people watching it.
+    </p>
+    <p>
+      A tool with 2 active builders growing at 35% is the Spark-in-2012 pattern.
+      A tool with 1 active builder and no recent commits is a maintenance risk.
+      Enterprise adoption (even 1 org) is early validation that the tool
+      survived a serious engineering review.
+    </p>
+  </details>
 </section>
 
 {% if tools %}
@@ -40,22 +55,39 @@
     <ul class="metric-list">
       <li>Repos using it: <strong>{{ "{:,}".format(t.total_repos|int) }}</strong> <span>(still under {{ radar_max_repos }})</span></li>
       <li>New in 90 days: <strong>{{ "{:,}".format(t.new_repos_90d|int) }}</strong> <span>({{ "%.0f"|format((t.growth_ratio|float) * 100) }}% of base)</span></li>
-      <li>Weekly downloads: <strong>{% if t.downloads_source %}{{ format_compact(t.weekly_downloads|int) }} ({{ t.downloads_source }}){% else %}—{% endif %}</strong></li>
       <li>Enterprise orgs: <strong>{% if t.enterprise_repo_count|int > 0 %}{{ t.enterprise_repo_count|int }} detected{% else %}None yet{% endif %}</strong></li>
+      <li>Last activity: <strong class="{{ t.activity_class }}">{{ t.activity_signal }}</strong> {% if t.low_activity_note %}<span>{{ t.low_activity_note }}</span>{% endif %}</li>
+      <li>Active builders: <strong>{{ t.active_builder_count|int }} people</strong></li>
+      <li>Weekly downloads: <strong>{% if t.downloads_source %}{{ format_compact(t.weekly_downloads|int) }} ({{ t.downloads_source }}){% else %}—{% endif %}</strong></li>
       <li>Emergence score: <strong>{{ "%.2f"|format(t.emergence_score|float) }}</strong></li>
     </ul>
 
-    {% if t.top_builders %}
     <div class="radar-builders">
       <div class="label">Top builders</div>
-      {% for b in t.top_builders %}
-      <div class="small-note">
-        {% if b.html_url %}<a href="{{ b.html_url }}" target="_blank" class="builder-login">@{{ b.github_login }}</a>{% else %}@{{ b.github_login }}{% endif %}
-        ({{ "{:,}".format(b.followers|int) }} followers{% if b.company %} · {{ b.company }}{% endif %})
-      </div>
-      {% endfor %}
+      {% if t.has_contributor_data %}
+        {% for b in t.top_builders %}
+        <div class="contributor-row">
+          <div class="contributor-main">
+            {% if b.html_url %}
+            <a href="{{ b.html_url }}" target="_blank" class="builder-login">@{{ b.github_login }}</a>
+            {% else %}
+            <span class="builder-login">@{{ b.github_login }}</span>
+            {% endif %}
+            <span class="contributor-meta">
+              {% if b.name %}{{ b.name }}{% else %}Unknown{% endif %}
+              {% if b.company %} · {{ b.company }}{% endif %}
+              {% if b.followers|int > 0 %} · ★{{ format_followers(b.followers|int) }} followers{% endif %}
+            </span>
+          </div>
+          <span class="contributor-commits">{{ b.contributions|int }} commits</span>
+          {% if b.is_notable %}<span class="builder-notable">★ NOTABLE</span>{% endif %}
+        </div>
+        {% endfor %}
+      {% else %}
+      <div class="small-note">Contributor data not yet collected — run scripts/06_fetch_contributors.py</div>
+      {% endif %}
+      <div class="small-note {{ t.builder_note_class }}">{{ t.builder_note }}</div>
     </div>
-    {% endif %}
 
     <a class="radar-banner-link radar-card-link" href="{{ url_for('tool_detail', name=t.canonical_name) }}">View Full Analysis →</a>
   </article>
@@ -70,25 +102,4 @@
   </p>
 </section>
 {% endif %}
-
-<section class="card long-text" style="margin-top: 26px;">
-  <h2>How to use The Radar</h2>
-  <p>
-    The Radar surfaces tools in the pre-commercial window — after they have proven real adoption but before a company has been built around them.
-    This is historically the highest-value discovery window for investors.
-  </p>
-  <p><strong>What to look for:</strong></p>
-  <ul>
-    <li>Enterprise adopters (even 1-2) signal real-world validation</li>
-    <li>Contributors with research credentials or strong community reputation</li>
-    <li>A clear problem being solved (check the tool description)</li>
-    <li>No known VC funding or commercial entity yet</li>
-  </ul>
-  <p><strong>What this is NOT:</strong></p>
-  <ul>
-    <li>A prediction that these tools will succeed</li>
-    <li>A complete picture (private repos are invisible)</li>
-    <li>A recommendation to invest in anything</li>
-  </ul>
-</section>
 {% endblock %}

@@ -55,6 +55,9 @@ CREATE TABLE IF NOT EXISTS tool_snapshots (
     sample_size INTEGER DEFAULT 0,
     confidence_tier TEXT DEFAULT 'Low',
     is_trend_reliable INTEGER DEFAULT 0,
+    last_ecosystem_activity TEXT,
+    days_since_ecosystem_activity INTEGER,
+    active_builder_count INTEGER DEFAULT 0,
     UNIQUE(canonical_name, snapshot_date),
     FOREIGN KEY (canonical_name) REFERENCES tools(canonical_name)
 );
@@ -230,6 +233,24 @@ def run_migrations(conn: sqlite3.Connection) -> None:
         "tool_snapshots",
         "is_trend_reliable",
         "is_trend_reliable INTEGER DEFAULT 0",
+    )
+    _ensure_column(
+        conn,
+        "tool_snapshots",
+        "last_ecosystem_activity",
+        "last_ecosystem_activity TEXT",
+    )
+    _ensure_column(
+        conn,
+        "tool_snapshots",
+        "days_since_ecosystem_activity",
+        "days_since_ecosystem_activity INTEGER",
+    )
+    _ensure_column(
+        conn,
+        "tool_snapshots",
+        "active_builder_count",
+        "active_builder_count INTEGER DEFAULT 0",
     )
     _ensure_column(
         conn,

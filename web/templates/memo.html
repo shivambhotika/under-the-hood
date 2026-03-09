@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="memo-shell">
+  <div class="memo-header-row">
+    <h1>Category Intelligence Briefs</h1>
+    <a class="memo-back-link" href="{{ url_for('category_view') }}">← back to categories</a>
+  </div>
+  <p class="subtitle">
+    First-pass market analysis from adoption data. Useful before meeting a founder in a category you don't know well.
+  </p>
+
+  <form method="get" action="{{ url_for('memo') }}" class="memo-form">
+    <div class="memo-form-grid">
+      <div>
+        <label for="category">Choose a category</label>
+        <select id="category" name="category">
+          <option value="">Select category...</option>
+          {% for c in categories %}
+          <option value="{{ c.category }}" {% if c.category == selected %}selected{% endif %}>{{ c.category }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit" class="memo-generate-btn">Generate Brief</button>
+    </div>
+  </form>
+</section>
+
+{% if not selected %}
+<section class="card memo-empty">
+  <h2>Select a category above to generate its intelligence brief.</h2>
+  <p class="subtitle">Briefs are most useful when:</p>
+  <ul>
+    <li>You're about to meet a founder building in this space</li>
+    <li>You're evaluating two competing tools for a portfolio company</li>
+    <li>You want a quick orientation on a category you haven't tracked before</li>
+  </ul>
+</section>
+{% elif not memo %}
+<section class="card memo-empty">
+  <h2>Not enough data to generate a brief for {{ selected }} yet.</h2>
+  <p class="subtitle">
+    This usually means the pipeline hasn't run for this category, or the tool universe in this category is too small.
+    Run: <code>python3 scripts/04_compute_scores.py</code>
+  </p>
+</section>
+{% else %}
+<section class="memo-doc">
+  <h2>{{ memo.category }} — Category Intelligence Brief</h2>
+  <p class="memo-meta">
+    Generated from adoption data · {{ memo.generated_at }} · {{ memo.tool_count }} tools · {{ "{:,}".format(memo.total_repos|int) }} repos
+  </p>
+  <span class="phase-badge">{{ memo.phase }}</span>
+
+  <div class="memo-divider"></div>
+  <div class="memo-section-label">The Verdict</div>
+  <p class="memo-verdict {% if memo.phase in ['Mature', 'Consolidating'] %}positive{% else %}caution{% endif %}">
+    {{ memo.verdict }}
+  </p>
+
+  <div class="memo-divider"></div>
+  <div class="memo-section-label">What The Data Shows</div>
+  <p class="memo-body">{{ memo.data_section }}</p>
+
+  <div class="memo-divider"></div>
+  <div class="memo-section-label">Who's Building The Leader</div>
+  <p class="memo-body">{{ memo.team_section }}</p>
+
+  {% if memo.top_contributors %}
+  <div class="memo-contrib-grid">
+    {% for c in memo.top_contributors %}
+    <div class="memo-contrib-card">
+      <div class="memo-contrib-login">@{{ c.github_login }}</div>
+      <div class="memo-contrib-meta">
+        {% if c.followers|int > 0 %}★ {{ format_followers(c.followers|int) }} followers{% endif %}
+        {% if c.company %} · {{ c.company }}{% endif %}
+        · {{ c.contributions|int }} commits
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="small-note">Contributor data not yet collected.</div>
+  {% endif %}
+
+  <div class="memo-divider"></div>
+  <div class="memo-section-label">Enterprise Validation</div>
+  <p class="memo-body">{{ memo.enterprise_section }}</p>
+  {% if memo.enterprise_orgs %}
+  <div class="memo-tag-row">
+    {% for org in memo.enterprise_orgs %}
+    <span class="memo-tag">{{ org }}</span>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="memo-divider"></div>
+  <div class="memo-section-label">What To Watch</div>
+  {% for item in memo.watch_items %}
+    {% if item.startswith('**') %}
+      {% set parts = item.split('**', 2) %}
+      <p class="memo-body"><strong>{{ parts[1] }}</strong>{{ parts[2] }}</p>
+    {% else %}
+      <p class="memo-body">{{ item }}</p>
+    {% endif %}
+  {% endfor %}
+
+  <div class="memo-divider"></div>
+  <div class="memo-section-label">Data Transparency Note</div>
+  <p class="memo-body">
+    Generated from scanning {{ "{:,}".format(memo.total_repos|int) }} public GitHub repositories with 500+ stars.
+    Covers OSS adoption only — private enterprise repos are not visible.
+    This is a starting point for a conversation, not a final verdict.
+  </p>
+  <div class="memo-actions">
+    <a href="{{ url_for('learn') }}" class="memo-link">View full methodology →</a>
+    <button id="copy-btn" type="button" class="memo-copy-btn">Copy as text</button>
+  </div>
+</section>
+
+<pre id="memo-text-content" class="memo-copy-raw">{{ memo.category }} — Category Intelligence Brief
+Generated: {{ memo.generated_at }}
+
+THE VERDICT
+{{ memo.verdict }}
+
+WHAT THE DATA SHOWS
+{{ memo.data_section }}
+
+WHO'S BUILDING THE LEADER
+{{ memo.team_section }}
+
+ENTERPRISE VALIDATION
+{{ memo.enterprise_section }}
+
+WHAT TO WATCH
+{% for item in memo.watch_items %}{{ item }}
+{% endfor %}
+---
+Generated by Under The Hood · underthehood.up.railway.app
+Data: {{ "{:,}".format(memo.total_repos|int) }} public GitHub repos · {{ memo.generated_at }}</pre>
+
+<script>
+  document.getElementById('copy-btn').addEventListener('click', function() {
+    const text = document.getElementById('memo-text-content').innerText;
+    navigator.clipboard.writeText(text).then(() => {
+      this.innerText = '✓ Copied';
+      setTimeout(() => { this.innerText = 'Copy as text'; }, 2000);
+    });
+  });
+</script>
+{% endif %}
+{% endblock %}

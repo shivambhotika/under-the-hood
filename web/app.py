@@ -6,17 +6,20 @@ from flask import Flask, redirect, render_template, request, url_for
 from web.data import (
     confidence_badge_copy,
     db_has_data,
+    format_activity_signal,
     generate_tool_insight,
     get_all_categories,
     get_all_tools,
     get_category_tools,
     get_download_history,
+    generate_category_memo,
     get_pre_commercial_signal,
     get_radar_snapshot,
     get_radar_tools,
     get_summary_stats,
     get_tool_detail,
     get_tool_contributors,
+    get_tool_top_contributors,
     get_top_movers,
     is_notable_contributor,
     phase_explainer,
@@ -51,6 +54,15 @@ def format_compact(num: int | float) -> str:
     return f"{int(n):,}"
 
 
+def format_followers(value: int | float) -> str:
+    n = float(value or 0)
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 1_000:
+        return f"{n / 1_000:.1f}K"
+    return f"{int(n):,}"
+
+
 def phase_short_label(phase: str) -> str:
     if phase == "Mature":
         return "One tool has won"
@@ -63,6 +75,7 @@ def phase_short_label(phase: str) -> str:
 def inject_helpers():
     return {
         "format_compact": format_compact,
+        "format_followers": format_followers,
         "phase_short_label": phase_short_label,
         "phase_explainer": phase_explainer,
     }
@@ -336,6 +349,25 @@ def category_view():
     )
 
 
+@app.get("/memo")
+def memo():
+    if not db_has_data():
+        return render_template("empty.html", page_title="Briefs")
+
+    categories = get_all_categories()
+    selected = request.args.get("category", "").strip()
+    memo_data = None
+    if selected:
+        memo_data = generate_category_memo(selected)
+    return render_template(
+        "memo.html",
+        page_title="Briefs",
+        categories=categories,
+        selected=selected,
+        memo=memo_data,
+    )
+
+
 @app.get("/radar")
 def radar():
     if not db_has_data():
@@ -344,18 +376,55 @@ def radar():
     radar_snapshot = get_radar_snapshot()
     tools = radar_snapshot["tools"]
     for tool in tools:
-        contributors = get_tool_contributors(tool["canonical_name"])
+        contributors = get_tool_top_contributors(tool["canonical_name"], limit=3)
         top_builders = []
-        for c in contributors[:2]:
+        for c in contributors:
             top_builders.append(
                 {
                     "github_login": c.get("github_login"),
+                    "name": c.get("name") or "",
+                    "contributions": int(c.get("contributions") or 0),
                     "followers": int(c.get("followers") or 0),
                     "company": c.get("company") or "",
+                    "bio": c.get("bio") or "",
                     "html_url": c.get("html_url") or "",
+                    "is_notable": int(c.get("followers") or 0) >= 500,
                 }
             )
         tool["top_builders"] = top_builders
+        tool["has_contributor_data"] = len(top_builders) > 0
+
+        days_since = tool.get("days_since_ecosystem_activity")
+        days_since_int = int(days_since) if days_since is not None else None
+        tool["activity_signal"] = format_activity_signal(days_since_int)
+        tool["days_since_ecosystem_activity"] = days_since_int
+        tool["activity_class"] = "activity-muted"
+        tool["low_activity_note"] = ""
+        if days_since_int is not None:
+            if days_since_int <= 7:
+                tool["activity_class"] = "activity-green"
+            elif days_since_int <= 30:
+                tool["activity_class"] = "activity-amber"
+            elif days_since_int <= 90:
+                tool["activity_class"] = "activity-muted"
+            else:
+                tool["activity_class"] = "activity-red"
+                tool["low_activity_note"] = "(low recent activity)"
+
+        builder_count = int(tool.get("active_builder_count") or 0)
+        if builder_count == 0 and not tool["has_contributor_data"]:
+            tool["builder_note"] = "Contributor data not yet collected — run scripts/06_fetch_contributors.py"
+            tool["builder_note_class"] = "builder-note-muted"
+        elif builder_count == 1:
+            tool["builder_note"] = "Single maintainer — bus factor risk"
+            tool["builder_note_class"] = "builder-note-amber"
+        elif 2 <= builder_count <= 5:
+            tool["builder_note"] = "Small focused team"
+            tool["builder_note_class"] = "builder-note-muted"
+        else:
+            tool["builder_note"] = f"Active community ({builder_count} contributors)"
+            tool["builder_note_class"] = "builder-note-green"
+
         tool["pre_commercial_signal"] = get_pre_commercial_signal(
             tool["canonical_name"], tool.get("github_repo"), contributors=contributors
         )

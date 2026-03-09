@@ -133,6 +133,50 @@ def compute_is_trend_reliable(canonical_name: str, conn) -> int:
     return 1 if int(count or 0) >= 4 else 0
 
 
+def compute_last_ecosystem_activity(canonical_name: str, conn):
+    """
+    Returns the most recent pushed_at date across all repos using this tool.
+    """
+    result = conn.execute(
+        """
+        SELECT MAX(pushed_at) AS max_pushed_at
+        FROM tool_repos
+        WHERE canonical_name = ? AND pushed_at IS NOT NULL AND stars > 0
+        """,
+        (canonical_name,),
+    ).fetchone()["max_pushed_at"]
+    return result
+
+
+def compute_days_since_activity(last_activity_date):
+    """
+    Returns integer days since most recent ecosystem activity.
+    Returns None if parsing fails or data is absent.
+    """
+    if not last_activity_date:
+        return None
+    try:
+        last = datetime.fromisoformat(str(last_activity_date).replace("Z", "+00:00")).date()
+        return (datetime.now(timezone.utc).date() - last).days
+    except Exception:
+        return None
+
+
+def compute_active_builder_count(canonical_name: str, conn) -> int:
+    """
+    Distinct contributors on the tool's own repository.
+    """
+    result = conn.execute(
+        """
+        SELECT COUNT(DISTINCT github_login) AS cnt
+        FROM tool_contributors
+        WHERE canonical_name = ?
+        """,
+        (canonical_name,),
+    ).fetchone()["cnt"]
+    return int(result or 0)
+
+
 def recompute_today_snapshot(conn, canonical_name: str, snapshot_date: str) -> None:
     total = conn.execute(
         """
@@ -213,14 +257,18 @@ def recompute_today_snapshot(conn, canonical_name: str, snapshot_date: str) -> N
     projected_snapshots = int(snapshot_count or 0) + (0 if int(existing_snapshot or 0) > 0 else 1)
     tier = compute_confidence_tier(int(total), projected_snapshots, metadata_coverage_pct)
     is_reliable = 1 if projected_snapshots >= 4 else 0
+    last_activity = compute_last_ecosystem_activity(canonical_name, conn)
+    days_since_activity = compute_days_since_activity(last_activity)
+    active_builder_count = compute_active_builder_count(canonical_name, conn)
 
     conn.execute(
         """
         INSERT INTO tool_snapshots (
             canonical_name, snapshot_date, total_repos, active_repos,
             new_repos_90d, stars_median, emergence_score, enterprise_repo_count,
-            sample_size, confidence_tier, is_trend_reliable
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            sample_size, confidence_tier, is_trend_reliable,
+            last_ecosystem_activity, days_since_ecosystem_activity, active_builder_count
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(canonical_name, snapshot_date) DO UPDATE SET
             total_repos=excluded.total_repos,
             active_repos=excluded.active_repos,
@@ -230,7 +278,10 @@ def recompute_today_snapshot(conn, canonical_name: str, snapshot_date: str) -> N
             enterprise_repo_count=excluded.enterprise_repo_count,
             sample_size=excluded.sample_size,
             confidence_tier=excluded.confidence_tier,
-            is_trend_reliable=excluded.is_trend_reliable
+            is_trend_reliable=excluded.is_trend_reliable,
+            last_ecosystem_activity=excluded.last_ecosystem_activity,
+            days_since_ecosystem_activity=excluded.days_since_ecosystem_activity,
+            active_builder_count=excluded.active_builder_count
         """,
         (
             canonical_name,
@@ -244,6 +295,9 @@ def recompute_today_snapshot(conn, canonical_name: str, snapshot_date: str) -> N
             int(total),
             tier,
             int(is_reliable),
+            last_activity,
+            days_since_activity,
+            int(active_builder_count),
         ),
     )
     reliable_now = compute_is_trend_reliable(canonical_name, conn)

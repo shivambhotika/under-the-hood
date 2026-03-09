@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 import time
+from datetime import date, datetime
 from functools import wraps
 from pathlib import Path
 from typing import Any, Callable
@@ -168,7 +169,10 @@ def get_all_tools(ecosystem: str | None = None, category: str | None = None) -> 
                 s.downloads_source AS downloads_source,
                 COALESCE(s.sample_size, 0) AS sample_size,
                 COALESCE(s.confidence_tier, 'Low') AS confidence_tier,
-                COALESCE(s.is_trend_reliable, 0) AS is_trend_reliable
+                COALESCE(s.is_trend_reliable, 0) AS is_trend_reliable,
+                s.last_ecosystem_activity AS last_ecosystem_activity,
+                s.days_since_ecosystem_activity AS days_since_ecosystem_activity,
+                COALESCE(s.active_builder_count, 0) AS active_builder_count
             FROM tools t
             LEFT JOIN tool_snapshots s
               ON s.canonical_name = t.canonical_name
@@ -234,7 +238,10 @@ def get_tool_detail(canonical_name: str) -> dict[str, Any] | None:
                 s.downloads_source AS downloads_source,
                 COALESCE(s.sample_size, 0) AS sample_size,
                 COALESCE(s.confidence_tier, 'Low') AS confidence_tier,
-                COALESCE(s.is_trend_reliable, 0) AS is_trend_reliable
+                COALESCE(s.is_trend_reliable, 0) AS is_trend_reliable,
+                s.last_ecosystem_activity AS last_ecosystem_activity,
+                s.days_since_ecosystem_activity AS days_since_ecosystem_activity,
+                COALESCE(s.active_builder_count, 0) AS active_builder_count
             FROM tools t
             LEFT JOIN tool_snapshots s
               ON s.canonical_name = t.canonical_name
@@ -352,6 +359,44 @@ def get_tool_contributors(canonical_name: str) -> list[dict[str, Any]]:
     return _row_dicts(rows)
 
 
+@ttl_cache(3600)
+def get_tool_top_contributors(canonical_name: str, limit: int = 3) -> list[dict[str, Any]]:
+    """
+    Returns top N contributors for a tool, sorted by contributions DESC.
+    Used on Radar cards for team display.
+    """
+    with _conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT github_login, contributions, company, followers,
+                   bio, html_url, name
+            FROM tool_contributors
+            WHERE canonical_name = ?
+            ORDER BY contributions DESC
+            LIMIT ?
+            """,
+            (canonical_name, limit),
+        ).fetchall()
+    return _row_dicts(rows)
+
+
+def format_activity_signal(days_since: int | None) -> str:
+    """Converts days integer to human-readable string."""
+    if days_since is None:
+        return "Unknown"
+    if days_since <= 1:
+        return "Today"
+    if days_since <= 7:
+        return f"{days_since} days ago"
+    if days_since <= 30:
+        weeks = days_since // 7
+        return f"{weeks} week{'s' if weeks > 1 else ''} ago"
+    if days_since <= 90:
+        months = days_since // 30
+        return f"{months} month{'s' if months > 1 else ''} ago"
+    return f"{days_since} days ago"
+
+
 def is_notable_contributor(contributor: dict[str, Any]) -> bool:
     followers = int(contributor.get("followers") or 0)
     if followers >= 500:
@@ -394,7 +439,10 @@ def _query_radar_rows(conn: sqlite3.Connection, snapshot_date: str, growth_ratio
             COALESCE(s.weekly_downloads, 0) AS weekly_downloads,
             s.downloads_source AS downloads_source,
             COALESCE(s.sample_size, 0) AS sample_size,
-            COALESCE(s.confidence_tier, 'Low') AS confidence_tier
+            COALESCE(s.confidence_tier, 'Low') AS confidence_tier,
+            s.last_ecosystem_activity AS last_ecosystem_activity,
+            s.days_since_ecosystem_activity AS days_since_ecosystem_activity,
+            COALESCE(s.active_builder_count, 0) AS active_builder_count
         FROM tools t
         JOIN tool_snapshots s ON s.canonical_name = t.canonical_name
         WHERE s.snapshot_date = ?
@@ -527,3 +575,279 @@ def median_stars_for_tool(canonical_name: str) -> float:
         ).fetchall()
     stars = [int(r["stars"]) for r in rows]
     return float(np.median(stars)) if stars else 0.0
+
+
+@ttl_cache(1800)
+def generate_category_memo(category: str) -> dict[str, Any] | None:
+    """
+    Generates a category intelligence brief from adoption data.
+    Returns a dict with all sections. No LLM, deterministic templates.
+    """
+    snapshot_date = latest_snapshot_date()
+    if not snapshot_date:
+        return None
+
+    with _conn() as conn:
+        cat_row = conn.execute(
+            "SELECT * FROM categories WHERE category = ?",
+            (category,),
+        ).fetchone()
+        if not cat_row:
+            return None
+        cat = dict(cat_row)
+
+        tools_rows = conn.execute(
+            """
+            SELECT t.canonical_name, t.display_name, t.ecosystem,
+                   t.description, t.github_repo,
+                   COALESCE(s.total_repos, 0) AS total_repos,
+                   COALESCE(s.new_repos_90d, 0) AS new_repos_90d,
+                   COALESCE(s.active_repos, 0) AS active_repos,
+                   COALESCE(s.emergence_score, 0) AS emergence_score,
+                   COALESCE(s.weekly_downloads, 0) AS weekly_downloads,
+                   COALESCE(s.enterprise_repo_count, 0) AS enterprise_repo_count,
+                   COALESCE(s.confidence_tier, 'Low') AS confidence_tier,
+                   COALESCE(s.active_builder_count, 0) AS active_builder_count,
+                   COALESCE(s.days_since_ecosystem_activity, 999) AS days_since_activity
+            FROM tools t
+            LEFT JOIN tool_snapshots s ON t.canonical_name = s.canonical_name
+                AND s.snapshot_date = ?
+            WHERE t.category = ?
+            ORDER BY total_repos DESC
+            """,
+            (snapshot_date, category),
+        ).fetchall()
+        tools = _row_dicts(tools_rows)
+        if not tools:
+            return None
+
+        total_category_repos = sum(int(t["total_repos"] or 0) for t in tools)
+        for tool in tools:
+            tool["share_pct"] = round((int(tool["total_repos"] or 0) / max(1, total_category_repos)) * 100, 1)
+
+        top = tools[0] if len(tools) > 0 else None
+        runner_up = tools[1] if len(tools) > 1 else None
+        dark_horse = max(tools, key=lambda x: float(x.get("emergence_score") or 0)) if tools else None
+        if dark_horse and top and dark_horse["canonical_name"] == top["canonical_name"]:
+            alternatives = [t for t in tools if t["canonical_name"] != top["canonical_name"]]
+            dark_horse = max(alternatives, key=lambda x: float(x.get("emergence_score") or 0), default=None)
+
+        phase = cat.get("market_phase", "In Transition")
+        frag = float(cat.get("fragmentation_index") or 0.5)
+
+        def get_top_contributors_for_memo(canonical: str, n: int = 2) -> list[dict[str, Any]]:
+            rows = conn.execute(
+                """
+                SELECT github_login, contributions, company, followers, name
+                FROM tool_contributors
+                WHERE canonical_name = ?
+                ORDER BY contributions DESC
+                LIMIT ?
+                """,
+                (canonical, n),
+            ).fetchall()
+            return _row_dicts(rows)
+
+        top_contributors = get_top_contributors_for_memo(top["canonical_name"]) if top else []
+        runner_up_contributors = (
+            get_top_contributors_for_memo(runner_up["canonical_name"]) if runner_up else []
+        )
+
+        enterprise_orgs: list[str] = []
+        if top:
+            org_rows = conn.execute(
+                """
+                SELECT DISTINCT SUBSTR(repo_full_name, 1, INSTR(repo_full_name, '/') - 1) AS org
+                FROM tool_repos
+                WHERE canonical_name = ? AND is_enterprise_repo = 1
+                LIMIT 5
+                """,
+                (top["canonical_name"],),
+            ).fetchall()
+            enterprise_orgs = [r["org"] for r in org_rows if r["org"]]
+
+    def generate_verdict(current_phase: str, top_tool: dict[str, Any] | None) -> str:
+        name = top_tool["display_name"] if top_tool else "No clear leader"
+        share = float(top_tool["share_pct"]) if top_tool else 0.0
+        if current_phase == "Mature":
+            return f"{name} has won this category with {share:.0f}% of tracked repos. The market has decided."
+        if current_phase == "Consolidating":
+            return f"{name} is pulling ahead at {share:.0f}%. This category has months, not years, before it settles."
+        if current_phase == "Early / Competing":
+            return f"No winner yet. {name} leads with only {share:.0f}% — this is an active competition."
+        if current_phase == "Fragmenting":
+            return "Fragmented with no momentum behind any tool. Either unsolved or moving to non-OSS solutions."
+        return f"{name} currently leads at {share:.0f}%, but the landscape is shifting. Worth monitoring closely."
+
+    def generate_data_section(
+        top_tool: dict[str, Any] | None,
+        second_tool: dict[str, Any] | None,
+        frag_index: float,
+        category_repos: int,
+    ) -> str:
+        if not top_tool:
+            return "Insufficient data to generate analysis."
+
+        top_name = top_tool["display_name"]
+        top_share = float(top_tool["share_pct"])
+        top_repos = int(top_tool["total_repos"])
+        top_growth = round((int(top_tool["new_repos_90d"]) / max(1, top_repos)) * 100)
+
+        frag_label = (
+            "highly fragmented — no tool has meaningful concentration"
+            if frag_index > 0.65
+            else "moderately fragmented — a leader is emerging but not dominant"
+            if frag_index > 0.45
+            else "concentrating — one or two tools pulling clearly ahead"
+            if frag_index > 0.25
+            else "concentrated — one tool has structural dominance"
+        )
+
+        base = (
+            f"Across {category_repos:,} tracked repositories in this category, the adoption picture is {frag_label}. "
+            f"{top_name} leads with {top_repos:,} repos ({top_share:.0f}% share), with {top_growth}% of its base added in the last 90 days. "
+        )
+
+        if second_tool:
+            second_name = second_tool["display_name"]
+            second_share = float(second_tool["share_pct"])
+            gap = top_share - second_share
+            if gap < 10:
+                base += (
+                    f"{second_name} is close behind at {second_share:.0f}% — a gap of only {gap:.0f} points. "
+                    "The outcome here is genuinely uncertain."
+                )
+            elif gap < 25:
+                base += f"{second_name} holds {second_share:.0f}%, a {gap:.0f}-point gap that is widening."
+            else:
+                base += (
+                    f"The runner-up, {second_name}, holds {second_share:.0f}% — a gap large enough that catching up would require a significant shift."
+                )
+        return base
+
+    def generate_team_section(
+        top_tool: dict[str, Any] | None,
+        top_builder_rows: list[dict[str, Any]],
+    ) -> str:
+        if not top_tool:
+            return "No contributor data available."
+
+        top_name = top_tool["display_name"]
+        builder_count = int(top_tool["active_builder_count"] or 0)
+        days_active = int(top_tool["days_since_activity"] or 999)
+
+        if days_active <= 7:
+            activity_note = "with commits as recently as this week"
+        elif days_active <= 30:
+            activity_note = f"last commit {days_active} days ago"
+        elif days_active <= 90:
+            activity_note = f"last activity {days_active} days ago — moderate pace"
+        else:
+            activity_note = f"last activity {days_active} days ago — slowing"
+
+        if builder_count == 0:
+            team_note = f"Contributor data not yet collected for {top_name}."
+        elif builder_count == 1:
+            team_note = (
+                f"{top_name} is currently maintained by a single contributor ({activity_note}). "
+                "High bus factor risk — sole maintainer dependency is a due diligence flag."
+            )
+        elif builder_count <= 4:
+            team_note = (
+                f"{top_name} is built by a small team of {builder_count} contributors ({activity_note}). "
+                "Small teams with this trajectory often represent the pre-company stage."
+            )
+        else:
+            team_note = (
+                f"{top_name} has {builder_count} active contributors ({activity_note}), "
+                "suggesting a healthy community or established team behind the project."
+            )
+
+        notable = next((c for c in top_builder_rows if int(c.get("followers") or 0) >= 500), None)
+        if notable:
+            name_str = notable.get("name") or notable["github_login"]
+            company_str = f" ({notable['company']})" if notable.get("company") else ""
+            followers = int(notable.get("followers") or 0)
+            team_note += (
+                f" The most prominent contributor is {name_str}{company_str}, "
+                f"with {followers:,} GitHub followers — indicating strong community reputation."
+            )
+        return team_note
+
+    def generate_enterprise_section(top_tool: dict[str, Any] | None, orgs: list[str]) -> str:
+        if not top_tool:
+            return ""
+
+        top_name = top_tool["display_name"]
+        ent_count = int(top_tool["enterprise_repo_count"] or 0)
+        if ent_count == 0:
+            return (
+                f"No enterprise adoption detected for {top_name} in tracked repositories. "
+                "This is typical for tools still in the developer/OSS phase — enterprise adoption usually follows OSS momentum by 12–18 months. "
+                "Absence of enterprise signal is not a negative at this stage; it indicates the tool is earlier in the adoption curve."
+            )
+        if ent_count <= 3:
+            orgs_str = ", ".join(orgs[:3]) if orgs else f"{ent_count} orgs"
+            return (
+                f"{top_name} has been adopted by {ent_count} enterprise-grade organization{'s' if ent_count > 1 else ''} ({orgs_str}). "
+                "Early enterprise adoption is a quality signal — these organizations apply rigorous technical evaluation before adding dependencies."
+            )
+
+        orgs_str = ", ".join(orgs[:3]) if orgs else ""
+        and_more = f" and {ent_count - 3} more" if ent_count > 3 else ""
+        return (
+            f"{top_name} has meaningful enterprise adoption across {ent_count} tracked organizations ({orgs_str}{and_more}). "
+            "This level of enterprise presence suggests the tool has crossed from OSS curiosity to production-grade infrastructure."
+        )
+
+    def generate_watch_section(
+        current_phase: str,
+        top_tool: dict[str, Any] | None,
+        second_tool: dict[str, Any] | None,
+        rising_tool: dict[str, Any] | None,
+    ) -> list[str]:
+        items: list[str] = []
+
+        if second_tool and float(second_tool.get("emergence_score") or 0) > 15:
+            growth = round((int(second_tool["new_repos_90d"]) / max(1, int(second_tool["total_repos"]))) * 100)
+            items.append(
+                f"**{second_tool['display_name']}** is the tool to watch most closely. Growing at {growth}% in 90 days and gaining ground. If this trajectory holds for another 2 quarters, the category share picture changes materially."
+            )
+
+        if rising_tool and float(rising_tool.get("emergence_score") or 0) > 20:
+            dh_repos = int(rising_tool["total_repos"])
+            dh_growth = round((int(rising_tool["new_repos_90d"]) / max(1, dh_repos)) * 100)
+            items.append(
+                f"**{rising_tool['display_name']}** is the dark horse — only {dh_repos:,} repos using it but {dh_growth}% of those were added in the last 90 days. Small base, fast growth. Check back in 60 days."
+            )
+
+        if current_phase == "Mature" and top_tool:
+            items.append(
+                f"In a mature category, the question shifts from who wins to who disrupts. Watch for a new entrant targeting {top_tool['display_name']}'s weakest points, usually performance or cold-start time."
+            )
+
+        if not items:
+            items.append("No strong directional signal on the competitive dynamics yet. Revisit when more weekly snapshots have accumulated.")
+        return items
+
+    return {
+        "category": category,
+        "phase": phase,
+        "generated_at": datetime.now().strftime("%B %d, %Y"),
+        "tool_count": len(tools),
+        "total_repos": total_category_repos,
+        "top_tool": top,
+        "runner_up": runner_up,
+        "dark_horse": dark_horse,
+        "enterprise_orgs": enterprise_orgs,
+        "verdict": generate_verdict(phase, top),
+        "data_section": generate_data_section(top, runner_up, frag, total_category_repos),
+        "team_section": generate_team_section(top, top_contributors),
+        "enterprise_section": generate_enterprise_section(top, enterprise_orgs),
+        "watch_items": generate_watch_section(phase, top, runner_up, dark_horse),
+        "all_tools": tools,
+        "top_contributors": top_contributors,
+        "runner_up_contributors": runner_up_contributors,
+        "snapshot_date": snapshot_date,
+        "generated_iso_date": date.today().isoformat(),
+    }

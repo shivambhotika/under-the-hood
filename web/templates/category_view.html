@@ -42,6 +42,7 @@
 <section class="insight-box">
   <div class="label">Category insight</div>
   <p>{{ cat.insight_text }}</p>
+  <a href="{{ url_for('memo', category=cat.category) }}" class="memo-inline-link">→ Generate full intelligence brief for this category</a>
   <div class="small-note">Auto-generated from adoption data · Not editorial opinion</div>
 </section>
 

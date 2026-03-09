@@ -19,6 +19,7 @@
         <a href="{{ url_for('radar') }}" class="nav-link {% if request.path == '/radar' %}active{% endif %}">🔭 The Radar</a>
         <a href="{{ url_for('tool_detail') }}" class="nav-link {% if request.path == '/tool' %}active{% endif %}">🔍 Tool Deep Dive</a>
         <a href="{{ url_for('category_view') }}" class="nav-link {% if request.path == '/category' %}active{% endif %}">📦 Category View</a>
+        <a href="{{ url_for('memo') }}" class="nav-link {% if request.path == '/memo' %}active{% endif %}">📋 Briefs</a>
         <a href="{{ url_for('learn') }}" class="nav-link {% if request.path == '/learn' %}active{% endif %}">📖 How to Read This</a>
       </nav>
       <div class="sidebar-footer">
@@ -45,6 +46,10 @@
     <a href="{{ url_for('category_view') }}" class="mobile-tab {% if request.path == '/category' %}active{% endif %}">
       <span class="mobile-tab-icon">📦</span>
       <span class="mobile-tab-label">Categories</span>
+    </a>
+    <a href="{{ url_for('memo') }}" class="mobile-tab {% if request.path == '/memo' %}active{% endif %}">
+      <span class="mobile-tab-icon">📋</span>
+      <span class="mobile-tab-label">Briefs</span>
     </a>
     <a href="{{ url_for('radar') }}" class="mobile-tab {% if request.path == '/radar' %}active{% endif %}">
       <span class="mobile-tab-icon">🔭</span>
