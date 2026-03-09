@@ -275,10 +275,11 @@ def category_view():
             hovertemplate="%{y}: %{x:,} repos (projects using this tool)<extra></extra>",
         )
     )
+    category_layout = plotly_defaults()
+    category_layout["margin"] = dict(l=120, r=20, t=30, b=20)
     bar_fig.update_layout(
-        **plotly_defaults(),
+        **category_layout,
         height=420,
-        margin=dict(l=120, r=20, t=30, b=20),
         xaxis_title="Total repos (projects using each tool)",
         yaxis_title="",
     )
