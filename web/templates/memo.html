@@ -1,28 +1,26 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="memo-shell">
-  <div class="memo-header-row">
-    <h1>Category Intelligence Briefs</h1>
-    <a class="memo-back-link" href="{{ url_for('category_view') }}">← back to categories</a>
-  </div>
+  <h1>Category Intelligence Briefs</h1>
+  <a class="memo-back-link memo-back-inline" href="{{ url_for('category_view') }}">← back to categories</a>
   <p class="subtitle">
     First-pass market analysis from adoption data. Useful before meeting a founder in a category you don't know well.
   </p>
 
-  <form method="get" action="{{ url_for('memo') }}" class="memo-form">
-    <div class="memo-form-grid">
-      <div>
-        <label for="category">Choose a category</label>
+  <div class="card memo-control-card">
+    <form method="get" action="{{ url_for('memo') }}" class="memo-form">
+      <label for="category">Choose a category</label>
+      <div class="memo-form-grid">
         <select id="category" name="category">
           <option value="">Select category...</option>
           {% for c in categories %}
           <option value="{{ c.category }}" {% if c.category == selected %}selected{% endif %}>{{ c.category }}</option>
           {% endfor %}
         </select>
+        <button type="submit" class="memo-generate-btn">Generate Brief</button>
       </div>
-      <button type="submit" class="memo-generate-btn">Generate Brief</button>
-    </div>
-  </form>
+    </form>
+  </div>
 </section>
 
 {% if not selected %}

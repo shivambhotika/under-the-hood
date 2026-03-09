@@ -704,17 +704,41 @@ th {
   color: #d4d4d8;
 }
 
-.memo-shell,
-.memo-doc {
-  max-width: 720px;
+.reading-shell {
+  max-width: 980px;
   margin: 0 auto;
 }
 
-.memo-header-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
+.learn-shell section {
+  margin-bottom: 20px;
+}
+
+.learn-concepts details {
+  margin-bottom: 10px;
+}
+
+.memo-shell,
+.memo-empty {
+  max-width: 860px;
+  margin: 0 auto;
+}
+
+.memo-doc {
+  max-width: 860px;
+  margin: 0 auto;
+  background: rgba(15, 15, 18, 0.92);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 22px 24px;
+}
+
+.memo-doc h2 {
+  margin-top: 0;
+}
+
+.memo-back-inline {
+  display: inline-flex;
+  margin-bottom: 12px;
 }
 
 .memo-back-link,
@@ -731,14 +755,63 @@ th {
 }
 
 .memo-form {
-  margin-top: 14px;
+  margin-top: 4px;
+}
+
+.memo-form label {
+  display: block;
+  margin-bottom: 8px;
+  color: #d4d4d8;
+  font-size: 14px;
+}
+
+.memo-form select {
+  width: 100%;
+  background: var(--bg2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 11px 12px;
+  border-radius: 10px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 13px;
+}
+
+.memo-control-card {
+  margin-top: 6px;
 }
 
 .memo-form-grid {
-  display: grid;
-  grid-template-columns: 1fr auto;
+  display: flex;
   gap: 10px;
-  align-items: end;
+  align-items: center;
+  max-width: 640px;
+}
+
+.memo-form-grid select {
+  flex: 1 1 auto;
+}
+
+.memo-form-grid .memo-generate-btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.memo-shell .subtitle {
+  max-width: 760px;
+}
+
+.memo-empty {
+  margin-top: 18px;
+}
+
+.memo-empty ul {
+  line-height: 1.8;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.memo-empty li {
+  margin-bottom: 4px;
 }
 
 .memo-generate-btn,
@@ -757,10 +830,6 @@ th {
 .memo-generate-btn:hover,
 .memo-copy-btn:hover {
   background: rgba(34, 197, 94, 0.2);
-}
-
-.memo-empty ul {
-  line-height: 1.8;
 }
 
 .memo-meta {
@@ -1077,7 +1146,9 @@ details p {
   }
 
   .memo-form-grid {
+    display: grid;
     grid-template-columns: 1fr;
+    max-width: 100%;
   }
 
   .memo-contrib-grid {
