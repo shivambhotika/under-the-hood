@@ -7,7 +7,7 @@ from functools import wraps
 from pathlib import Path
 from typing import Any, Callable
 
-import numpy as np
+from statistics import median
 
 try:
     from scripts.enterprise_orgs import ENTERPRISE_ORGS
@@ -688,7 +688,7 @@ def median_stars_for_tool(canonical_name: str) -> float:
             (canonical_name,),
         ).fetchall()
     stars = [int(r["stars"]) for r in rows]
-    return float(np.median(stars)) if stars else 0.0
+    return float(median(stars)) if stars else 0.0
 
 
 def generate_health_section(top, top_health, runner_up, runner_up_health):

@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import math
 
-import plotly.graph_objects as go
+try:
+    import plotly.graph_objects as go
+except ModuleNotFoundError:
+    go = None
 from flask import Flask, redirect, render_template, request, url_for
 
 from web.data import (
@@ -302,7 +305,7 @@ def tool_detail():
         license_class = "health-warn"
 
     version_chart_html = ""
-    if tool.get("version_spread"):
+    if go is not None and tool.get("version_spread"):
         labels = [row["version_normalized"] for row in tool["version_spread"]]
         values = [int(row["cnt"]) for row in tool["version_spread"]]
         colors = [GREEN] + ["#52525B", "#4B5563", "#3F3F46", "#374151", "#27272A"]
@@ -327,7 +330,7 @@ def tool_detail():
 
     trend_chart_html = ""
     history = tool.get("history") or []
-    if len(history) > 1:
+    if go is not None and len(history) > 1:
         x = [h["snapshot_date"] for h in history]
         y = [int(h["total_repos"]) for h in history]
         fig2 = go.Figure(
@@ -416,44 +419,46 @@ def category_view():
     tools = sorted(get_category_tools(selected), key=lambda x: x["total_repos"], reverse=True)
     total_repos = sum(int(t["total_repos"]) for t in tools)
 
-    bar_fig = go.Figure(
-        go.Bar(
-            x=[int(t["total_repos"]) for t in tools],
-            y=[t["display_name"] for t in tools],
-            orientation="h",
-            marker=dict(
-                color=[
-                    "#22C55E",
-                    "#3B82F6",
-                    "#F59E0B",
-                    "#A855F7",
-                    "#F43F5E",
-                    "#14B8A6",
-                    "#EAB308",
-                    "#60A5FA",
-                    "#FB7185",
-                    "#34D399",
-                ][: len(tools)]
-            ),
-            text=[f"{int(t['total_repos']):,}" for t in tools],
-            textposition="outside",
-            hovertemplate="%{y}: %{x:,} repos (projects using this tool)<extra></extra>",
+    bar_html = ""
+    if go is not None:
+        bar_fig = go.Figure(
+            go.Bar(
+                x=[int(t["total_repos"]) for t in tools],
+                y=[t["display_name"] for t in tools],
+                orientation="h",
+                marker=dict(
+                    color=[
+                        "#22C55E",
+                        "#3B82F6",
+                        "#F59E0B",
+                        "#A855F7",
+                        "#F43F5E",
+                        "#14B8A6",
+                        "#EAB308",
+                        "#60A5FA",
+                        "#FB7185",
+                        "#34D399",
+                    ][: len(tools)]
+                ),
+                text=[f"{int(t['total_repos']):,}" for t in tools],
+                textposition="outside",
+                hovertemplate="%{y}: %{x:,} repos (projects using this tool)<extra></extra>",
+            )
         )
-    )
-    category_layout = plotly_defaults()
-    category_layout["margin"] = dict(l=120, r=20, t=30, b=20)
-    bar_fig.update_layout(
-        **category_layout,
-        height=420,
-        xaxis_title="Total repos (projects using each tool)",
-        yaxis_title="",
-    )
-    bar_fig.update_yaxes(autorange="reversed")
-    bar_html = bar_fig.to_html(
-        full_html=False,
-        include_plotlyjs="cdn",
-        config={"displayModeBar": False, "responsive": True},
-    )
+        category_layout = plotly_defaults()
+        category_layout["margin"] = dict(l=120, r=20, t=30, b=20)
+        bar_fig.update_layout(
+            **category_layout,
+            height=420,
+            xaxis_title="Total repos (projects using each tool)",
+            yaxis_title="",
+        )
+        bar_fig.update_yaxes(autorange="reversed")
+        bar_html = bar_fig.to_html(
+            full_html=False,
+            include_plotlyjs="cdn",
+            config={"displayModeBar": False, "responsive": True},
+        )
 
     rows = []
     for t in tools:
