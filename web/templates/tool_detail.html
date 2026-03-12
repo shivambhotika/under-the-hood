@@ -26,6 +26,7 @@
     {% if tool.github_repo %}
     <a class="pill link-pill" target="_blank" href="https://github.com/{{ tool.github_repo }}">GitHub repo (source project page)</a>
     {% endif %}
+    <a class="pill link-pill" href="{{ url_for('health_page', category=tool.category) }}">View health data →</a>
   </div>
 </section>
 
@@ -34,19 +35,22 @@
     <div class="label">Projects using it</div>
     <div class="value">{{ "{:,}".format(tool.total_repos|int) }}</div>
     <div class="sub">(public repos with 500+ stars that list this dependency)</div>
-    <div class="small-note confidence-line">{{ confidence_badge(confidence_tier, sample_size) }}</div>
+    {% if show_repos_delta %}
+    <div class="small-note metric-delta-line {{ repos_delta_class }}">{{ repos_delta_display }} this week</div>
+    {% endif %}
+    <div class="small-note confidence-line">{{ confidence_badge(confidence_tier, confidence_tooltip) }}</div>
   </article>
   <article class="card">
     <div class="label">New adopters (90 days)</div>
     <div class="value">{{ "{:,}".format(tool.new_repos_90d|int) }}</div>
     <div class="sub">(repos that started using it recently)</div>
-    <div class="small-note confidence-line">{{ confidence_badge(confidence_tier, sample_size) }}</div>
+    <div class="small-note confidence-line">{{ confidence_badge(confidence_tier, confidence_tooltip) }}</div>
   </article>
   <article class="card">
     <div class="label">Still actively used</div>
     <div class="value">{{ "{:,}".format(tool.active_repos|int) }}</div>
     <div class="sub">({{ "%.0f"|format(active_pct) }}% of using repos were updated in the last 30 days)</div>
-    <div class="small-note confidence-line">{{ confidence_badge(confidence_tier, sample_size) }}</div>
+    <div class="small-note confidence-line">{{ confidence_badge(confidence_tier, confidence_tooltip) }}</div>
   </article>
 </section>
 
@@ -62,6 +66,9 @@
       {% if has_downloads %}
       <div class="value">{{ format_compact(weekly_downloads|int) }} / week</div>
       <div class="sub">({{ downloads_source }} registry, last 7 days)</div>
+      {% if show_downloads_delta %}
+      <div class="small-note metric-delta-line {{ downloads_delta_class }}">{{ downloads_delta_compact }} this week</div>
+      {% endif %}
       {% elif usage_model == "standalone_first" %}
       <div class="value">—</div>
       <div class="sub">This tool runs primarily as a standalone service/CLI, so registry download counts are not the primary signal.</div>
@@ -80,6 +87,43 @@
     Download counts come from npm and PyPI registries and represent the last 7 days. They include automated CI/CD pipelines and mirrors, so raw numbers run higher than actual developer usage. Use directionally.
   </p>
 </section>
+
+{% if show_health_section %}
+<section class="dependency-health">
+  <h2>Dependency Health</h2>
+  <p class="subtitle">How robust is this tool as a dependency for production systems?</p>
+  {% if health_data_available %}
+  <div class="health-tier-banner {{ health_tier_class }}">
+    <div class="health-tier-head">{{ health_icon }} {{ health_tier }} ({{ "%.1f"|format(health_score|float) }} / 100)</div>
+    <div class="health-tier-reason">"{{ health_reason }}"</div>
+  </div>
+  <div class="health-metric-grid">
+    <article class="card">
+      <div class="label">Last release</div>
+      <div class="value {{ last_release_class }}">{{ last_release_text }}</div>
+      <div class="sub">(how recently a new version was published)</div>
+    </article>
+    <article class="card">
+      <div class="label">Known vulnerabilities</div>
+      <div class="value {{ advisory_class }}">{{ advisory_text }}</div>
+      <div class="sub">(advisories from OSV database, all severity levels)</div>
+    </article>
+    <article class="card">
+      <div class="label">Transitive dependencies</div>
+      <div class="value {{ transitive_dep_class }}">{{ transitive_dep_text }}</div>
+      <div class="sub">(total packages this tool pulls in when installed)</div>
+    </article>
+    <article class="card">
+      <div class="label">License</div>
+      <div class="value {{ license_class }}">{{ license_text }}</div>
+      <div class="sub">(permissive licenses are typically safer for commercial use)</div>
+    </article>
+  </div>
+  {% else %}
+  <div class="small-note">Health data not yet collected for this tool. Run scripts/08_enrich_health.py to populate.</div>
+  {% endif %}
+</section>
+{% endif %}
 
 <section class="builder-section">
   <h2>Who's Building This</h2>

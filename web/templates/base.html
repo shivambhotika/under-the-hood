@@ -19,6 +19,7 @@
         <a href="{{ url_for('radar') }}" class="nav-link {% if request.path == '/radar' %}active{% endif %}">🔭 The Radar</a>
         <a href="{{ url_for('tool_detail') }}" class="nav-link {% if request.path == '/tool' %}active{% endif %}">🔍 Tool Deep Dive</a>
         <a href="{{ url_for('category_view') }}" class="nav-link {% if request.path == '/category' %}active{% endif %}">📦 Category View</a>
+        <a href="{{ url_for('health_page') }}" class="nav-link {% if request.path == '/health' %}active{% endif %}">🏥 Health</a>
         <a href="{{ url_for('memo') }}" class="nav-link {% if request.path == '/memo' %}active{% endif %}">📋 Briefs</a>
         <a href="{{ url_for('learn') }}" class="nav-link {% if request.path == '/learn' %}active{% endif %}">📖 How to Read This</a>
       </nav>
@@ -26,6 +27,7 @@
         Data: GitHub API<br>
         Updated: Weekly<br>
         Repos tracked: 500+ stars
+        <a class="ops-link" href="{{ url_for('ops') }}">ops</a>
       </div>
     </aside>
 
@@ -47,14 +49,32 @@
       <span class="mobile-tab-icon">📦</span>
       <span class="mobile-tab-label">Categories</span>
     </a>
-    <a href="{{ url_for('memo') }}" class="mobile-tab {% if request.path == '/memo' %}active{% endif %}">
-      <span class="mobile-tab-icon">📋</span>
-      <span class="mobile-tab-label">Briefs</span>
+    <a href="{{ url_for('health_page') }}" class="mobile-tab {% if request.path == '/health' %}active{% endif %}" aria-label="Health">
+      <span class="mobile-tab-icon">🏥</span>
+      <span class="mobile-tab-label">Health</span>
     </a>
     <a href="{{ url_for('radar') }}" class="mobile-tab {% if request.path == '/radar' %}active{% endif %}">
       <span class="mobile-tab-icon">🔭</span>
       <span class="mobile-tab-label">Radar</span>
     </a>
   </nav>
+  <script>
+    document.querySelectorAll('[data-tooltip]').forEach((el) => {
+      el.addEventListener('click', function (e) {
+        e.stopPropagation();
+        document.querySelectorAll('.tooltip-popup').forEach((t) => t.remove());
+        const text = this.dataset.tooltip;
+        if (!text) return;
+        const popup = document.createElement('div');
+        popup.className = 'tooltip-popup';
+        popup.textContent = text;
+        this.appendChild(popup);
+        setTimeout(() => popup.remove(), 3000);
+      });
+    });
+    document.addEventListener('click', () => {
+      document.querySelectorAll('.tooltip-popup').forEach((t) => t.remove());
+    });
+  </script>
 </body>
 </html>

@@ -70,6 +70,10 @@ def ttl_cache(seconds: int = 3600) -> Callable:
     return decorator
 
 
+def cache_with_ttl(seconds: int = 3600) -> Callable:
+    return ttl_cache(seconds)
+
+
 def _conn() -> sqlite3.Connection:
     global _SCHEMA_READY
     if not _SCHEMA_READY:
@@ -169,7 +173,12 @@ def get_all_tools(ecosystem: str | None = None, category: str | None = None) -> 
                 s.downloads_source AS downloads_source,
                 COALESCE(s.sample_size, 0) AS sample_size,
                 COALESCE(s.confidence_tier, 'Low') AS confidence_tier,
+                COALESCE(s.sample_tier, 'Low') AS sample_tier,
+                COALESCE(s.trend_tier, 'Early') AS trend_tier,
+                COALESCE(s.confidence_tooltip, '') AS confidence_tooltip,
                 COALESCE(s.is_trend_reliable, 0) AS is_trend_reliable,
+                COALESCE(s.repos_delta_7d, 0) AS repos_delta_7d,
+                COALESCE(s.downloads_delta_7d, 0) AS downloads_delta_7d,
                 s.last_ecosystem_activity AS last_ecosystem_activity,
                 s.days_since_ecosystem_activity AS days_since_ecosystem_activity,
                 COALESCE(s.active_builder_count, 0) AS active_builder_count
@@ -203,8 +212,14 @@ def get_top_movers(n: int = 6) -> list[dict[str, Any]]:
                    s.total_repos, s.new_repos_90d, s.emergence_score, s.active_repos,
                    COALESCE(s.sample_size, 0) AS sample_size,
                    COALESCE(s.confidence_tier, 'Low') AS confidence_tier,
+                   COALESCE(s.sample_tier, 'Low') AS sample_tier,
+                   COALESCE(s.trend_tier, 'Early') AS trend_tier,
+                   COALESCE(s.confidence_tooltip, '') AS confidence_tooltip,
+                   COALESCE(s.repos_delta_7d, 0) AS repos_delta_7d,
+                   COALESCE(s.downloads_delta_7d, 0) AS downloads_delta_7d,
                    COALESCE(s.weekly_downloads, 0) AS weekly_downloads,
-                   s.downloads_source
+                   s.downloads_source,
+                   COALESCE(s.is_trend_reliable, 0) AS is_trend_reliable
             FROM tools t
             JOIN tool_snapshots s ON s.canonical_name = t.canonical_name
             WHERE s.snapshot_date = ? AND s.total_repos > 10
@@ -238,7 +253,12 @@ def get_tool_detail(canonical_name: str) -> dict[str, Any] | None:
                 s.downloads_source AS downloads_source,
                 COALESCE(s.sample_size, 0) AS sample_size,
                 COALESCE(s.confidence_tier, 'Low') AS confidence_tier,
+                COALESCE(s.sample_tier, 'Low') AS sample_tier,
+                COALESCE(s.trend_tier, 'Early') AS trend_tier,
+                COALESCE(s.confidence_tooltip, '') AS confidence_tooltip,
                 COALESCE(s.is_trend_reliable, 0) AS is_trend_reliable,
+                COALESCE(s.repos_delta_7d, 0) AS repos_delta_7d,
+                COALESCE(s.downloads_delta_7d, 0) AS downloads_delta_7d,
                 s.last_ecosystem_activity AS last_ecosystem_activity,
                 s.days_since_ecosystem_activity AS days_since_ecosystem_activity,
                 COALESCE(s.active_builder_count, 0) AS active_builder_count
@@ -304,12 +324,18 @@ def get_tool_detail(canonical_name: str) -> dict[str, Any] | None:
             (canonical_name,),
         ).fetchall()
 
+        health = conn.execute(
+            "SELECT * FROM tool_health WHERE canonical_name = ?",
+            (canonical_name,),
+        ).fetchone()
+
     out = dict(tool)
     out["version_spread"] = _row_dicts(versions)
     out["enterprise_repos"] = _decorate_repo_rows(enterprise_repos)
     out["community_repos"] = _decorate_repo_rows(community_repos)
     out["top_repos"] = out["community_repos"]
     out["history"] = _row_dicts(history)
+    out["health"] = dict(health) if health else {}
     return out
 
 
@@ -339,6 +365,63 @@ def get_download_history(canonical_name: str) -> list[dict[str, Any]]:
             (canonical_name,),
         ).fetchall()
     return _row_dicts(rows)
+
+
+@cache_with_ttl(3600)
+def get_tool_health(canonical_name: str) -> dict[str, Any]:
+    """Returns health data for a single tool. Returns {} if not found."""
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM tool_health WHERE canonical_name = ?",
+            (canonical_name,),
+        ).fetchone()
+    return dict(row) if row else {}
+
+
+@cache_with_ttl(1800)
+def get_health_leaderboard(category: str | None = None, tier: str | None = None):
+    """
+    Returns all tools with health data, joined to snapshot data.
+    Sorted by health_score DESC by default.
+    Optionally filter by category or health_tier.
+    """
+    import pandas as pd
+
+    conn = _conn()
+    query = """
+        SELECT
+            t.canonical_name, t.display_name, t.ecosystem, t.category,
+            t.description,
+            h.health_score, h.health_tier, h.health_tier_reason,
+            h.last_release_days, h.advisory_total, h.advisory_critical,
+            h.transitive_dep_count, h.license, h.license_is_permissive,
+            h.deps_dev_found, h.osv_found,
+            COALESCE(s.total_repos, 0) as total_repos,
+            COALESCE(s.emergence_score, 0) as emergence_score,
+            COALESCE(s.confidence_tier, 'Low') as confidence_tier,
+            COALESCE(s.enterprise_repo_count, 0) as enterprise_repo_count,
+            COALESCE(s.repos_delta_7d, 0) as repos_delta_7d
+        FROM tools t
+        JOIN tool_health h ON t.canonical_name = h.canonical_name
+        LEFT JOIN tool_snapshots s ON t.canonical_name = s.canonical_name
+            AND s.snapshot_date = (SELECT MAX(snapshot_date) FROM tool_snapshots)
+        WHERE h.health_tier != 'Unknown'
+    """
+    params = []
+    if category:
+        query += " AND t.category = ?"
+        params.append(category)
+    if tier:
+        query += " AND h.health_tier = ?"
+        params.append(tier)
+    query += " ORDER BY h.health_score DESC, s.total_repos DESC"
+
+    try:
+        return pd.read_sql_query(query, conn, params=params)
+    except Exception:
+        return pd.DataFrame()
+    finally:
+        conn.close()
 
 
 @ttl_cache(3600)
@@ -397,6 +480,17 @@ def format_activity_signal(days_since: int | None) -> str:
     return f"{days_since} days ago"
 
 
+def format_delta(delta: int | None) -> tuple[str, str]:
+    """
+    Returns (display_string, css_class) for week-over-week deltas.
+    """
+    if delta is None or int(delta) == 0:
+        return "—", "delta-none"
+    if int(delta) > 0:
+        return f"+{int(delta):,}", "delta-positive"
+    return f"{int(delta):,}", "delta-negative"
+
+
 def is_notable_contributor(contributor: dict[str, Any]) -> bool:
     followers = int(contributor.get("followers") or 0)
     if followers >= 500:
@@ -440,6 +534,12 @@ def _query_radar_rows(conn: sqlite3.Connection, snapshot_date: str, growth_ratio
             s.downloads_source AS downloads_source,
             COALESCE(s.sample_size, 0) AS sample_size,
             COALESCE(s.confidence_tier, 'Low') AS confidence_tier,
+            COALESCE(s.sample_tier, 'Low') AS sample_tier,
+            COALESCE(s.trend_tier, 'Early') AS trend_tier,
+            COALESCE(s.confidence_tooltip, '') AS confidence_tooltip,
+            COALESCE(s.is_trend_reliable, 0) AS is_trend_reliable,
+            COALESCE(s.repos_delta_7d, 0) AS repos_delta_7d,
+            COALESCE(s.downloads_delta_7d, 0) AS downloads_delta_7d,
             s.last_ecosystem_activity AS last_ecosystem_activity,
             s.days_since_ecosystem_activity AS days_since_ecosystem_activity,
             COALESCE(s.active_builder_count, 0) AS active_builder_count
@@ -558,13 +658,27 @@ def generate_tool_insight(tool_data: dict[str, Any]) -> str:
     )
 
 
-def confidence_badge_copy(tier: str, sample_size: int) -> str:
+def confidence_badge_copy(tier: str, sample_size: int, snapshot_count: int | None = None) -> str:
     s = int(sample_size or 0)
+    if snapshot_count is None:
+        if tier == "High":
+            return f"Sample: based on {s} repos · Trend: 4+ snapshots"
+        if tier == "Medium":
+            return f"Sample: based on {s} repos — reasonable signal · Trend: building history"
+        return f"Sample: only {s} repos — treat as directional · Trend: early"
+
+    if snapshot_count >= 4:
+        trend_note = f"{snapshot_count} weeks of history"
+    elif snapshot_count >= 2:
+        trend_note = f"{snapshot_count} snapshots — trend still forming"
+    else:
+        trend_note = "1 snapshot — no trend data yet"
+
     if tier == "High":
-        return f"High confidence — based on {s} repos, reliable signal"
+        return f"Sample: based on {s} repos · Trend: {trend_note}"
     if tier == "Medium":
-        return f"Medium confidence — based on {s} repos, reasonably reliable and building history"
-    return f"Early signal — based on only {s} repos, directional only"
+        return f"Sample: based on {s} repos — reasonable signal · Trend: {trend_note}"
+    return f"Sample: only {s} repos — treat as directional · Trend: {trend_note}"
 
 
 def median_stars_for_tool(canonical_name: str) -> float:
@@ -575,6 +689,65 @@ def median_stars_for_tool(canonical_name: str) -> float:
         ).fetchall()
     stars = [int(r["stars"]) for r in rows]
     return float(np.median(stars)) if stars else 0.0
+
+
+def generate_health_section(top, top_health, runner_up, runner_up_health):
+    if not top_health:
+        return "Dependency health data not yet collected. Run scripts/08_enrich_health.py."
+
+    th = dict(top_health)
+    top_name = top["display_name"]
+    tier = th.get("health_tier", "Unknown")
+    score = float(th.get("health_score") or 0)
+    reason = th.get("health_tier_reason", "")
+    release_days = th.get("last_release_days")
+    advisories = int(th.get("advisory_total") or 0)
+
+    if tier == "Healthy":
+        base = f"{top_name} scores well on dependency health ({score:.0f}/100). "
+    elif tier == "Monitoring Required":
+        base = (
+            f"{top_name} shows some health signals worth watching (score: {score:.0f}/100). "
+            f"{reason}. "
+        )
+    elif tier in ("Declining Health", "Critical Concerns"):
+        base = (
+            f"{top_name} has notable dependency health concerns (score: {score:.0f}/100). "
+            f"{reason}. This warrants deeper diligence before building on it. "
+        )
+    else:
+        base = f"Health data for {top_name} is not yet available. "
+
+    if release_days is not None:
+        if release_days <= 30:
+            base += f"Active release cadence — last version {release_days} days ago. "
+        elif release_days <= 90:
+            base += f"Reasonable release pace — last version {release_days} days ago. "
+        elif release_days > 180:
+            base += f"Release cadence has slowed — last version {release_days} days ago. "
+
+    if advisories == 0:
+        base += "No known vulnerabilities in tracked versions. "
+    elif advisories <= 2:
+        base += f"{advisories} advisory noted — review severity before adopting in production. "
+    else:
+        base += f"{advisories} advisories on record — security review recommended. "
+
+    if runner_up and runner_up_health:
+        rh = dict(runner_up_health)
+        ru_name = runner_up["display_name"]
+        ru_score = float(rh.get("health_score") or 0)
+        if abs(score - ru_score) < 10:
+            base += f"Health parity with {ru_name} ({ru_score:.0f}/100) — comparable risk profile. "
+        elif score > ru_score:
+            base += (
+                f"{ru_name} scores lower at {ru_score:.0f}/100 — "
+                f"{top_name} is healthier from a dependency perspective. "
+            )
+        else:
+            base += f"Notably, {ru_name} scores higher at {ru_score:.0f}/100 despite lower adoption. "
+
+    return base.strip()
 
 
 @ttl_cache(1800)
@@ -665,6 +838,23 @@ def generate_category_memo(category: str) -> dict[str, Any] | None:
                 (top["canonical_name"],),
             ).fetchall()
             enterprise_orgs = [r["org"] for r in org_rows if r["org"]]
+
+        top_health = (
+            conn.execute(
+                "SELECT * FROM tool_health WHERE canonical_name = ?",
+                (top["canonical_name"],),
+            ).fetchone()
+            if top
+            else None
+        )
+        runner_up_health = (
+            conn.execute(
+                "SELECT * FROM tool_health WHERE canonical_name = ?",
+                (runner_up["canonical_name"],),
+            ).fetchone()
+            if runner_up
+            else None
+        )
 
     def generate_verdict(current_phase: str, top_tool: dict[str, Any] | None) -> str:
         name = top_tool["display_name"] if top_tool else "No clear leader"
@@ -844,10 +1034,108 @@ def generate_category_memo(category: str) -> dict[str, Any] | None:
         "data_section": generate_data_section(top, runner_up, frag, total_category_repos),
         "team_section": generate_team_section(top, top_contributors),
         "enterprise_section": generate_enterprise_section(top, enterprise_orgs),
+        "health_section": generate_health_section(top, top_health, runner_up, runner_up_health),
         "watch_items": generate_watch_section(phase, top, runner_up, dark_horse),
         "all_tools": tools,
         "top_contributors": top_contributors,
         "runner_up_contributors": runner_up_contributors,
         "snapshot_date": snapshot_date,
         "generated_iso_date": date.today().isoformat(),
+    }
+
+
+def get_ops_data() -> dict[str, Any]:
+    """Operational health data. Intentionally uncached."""
+    with _conn() as conn:
+        latest_snapshot = conn.execute(
+            "SELECT MAX(snapshot_date) AS d FROM tool_snapshots"
+        ).fetchone()["d"]
+        snapshot_summary_row = conn.execute(
+            """
+            SELECT
+                COUNT(*) AS tool_count,
+                MAX(snapshot_date) AS latest_date,
+                COALESCE(SUM(total_repos), 0) AS total_repos,
+                SUM(CASE WHEN confidence_tier = 'High' THEN 1 ELSE 0 END) AS high_conf,
+                SUM(CASE WHEN confidence_tier = 'Medium' THEN 1 ELSE 0 END) AS med_conf,
+                SUM(CASE WHEN confidence_tier = 'Low' THEN 1 ELSE 0 END) AS low_conf,
+                SUM(CASE WHEN weekly_downloads > 0 THEN 1 ELSE 0 END) AS with_downloads,
+                SUM(CASE WHEN repos_delta_7d != 0 THEN 1 ELSE 0 END) AS with_deltas
+            FROM tool_snapshots
+            WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM tool_snapshots)
+            """
+        ).fetchone()
+        snapshot_summary = dict(snapshot_summary_row) if snapshot_summary_row else {}
+
+        table_counts: dict[str, Any] = {}
+        for table in [
+            "tools",
+            "tool_repos",
+            "tool_snapshots",
+            "tool_contributors",
+            "download_snapshots",
+            "categories",
+            "api_cache",
+            "pipeline_runs",
+        ]:
+            try:
+                cnt = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                table_counts[table] = int(cnt or 0)
+            except Exception:
+                table_counts[table] = "table missing"
+
+        try:
+            recent_runs_rows = conn.execute(
+                """
+                SELECT run_date, run_type, status, duration_seconds,
+                       tools_processed, validation_passed, notes, completed_at
+                FROM pipeline_runs
+                ORDER BY id DESC
+                LIMIT 5
+                """
+            ).fetchall()
+            recent_runs = _row_dicts(recent_runs_rows)
+        except Exception:
+            recent_runs = []
+
+        zero_repos_rows = conn.execute(
+            """
+            SELECT t.display_name, t.ecosystem, t.category
+            FROM tool_snapshots s
+            JOIN tools t ON s.canonical_name = t.canonical_name
+            WHERE s.snapshot_date = (SELECT MAX(snapshot_date) FROM tool_snapshots)
+            AND s.total_repos = 0
+            ORDER BY t.display_name
+            """
+        ).fetchall()
+
+        zero_download_rows = conn.execute(
+            """
+            SELECT t.display_name, t.ecosystem, t.npm_package, t.pypi_package
+            FROM tool_snapshots s
+            JOIN tools t ON s.canonical_name = t.canonical_name
+            WHERE s.snapshot_date = (SELECT MAX(snapshot_date) FROM tool_snapshots)
+              AND s.weekly_downloads = 0
+              AND COALESCE(t.usage_model, 'dependency_first') != 'standalone_first'
+            ORDER BY s.total_repos DESC
+            LIMIT 15
+            """
+        ).fetchall()
+
+    freshness_days = None
+    if latest_snapshot:
+        try:
+            freshness_days = (date.today() - datetime.fromisoformat(latest_snapshot).date()).days
+        except Exception:
+            freshness_days = None
+
+    return {
+        "snapshot_summary": snapshot_summary,
+        "table_counts": table_counts,
+        "recent_runs": recent_runs,
+        "zero_repos_tools": _row_dicts(zero_repos_rows),
+        "zero_download_tools": _row_dicts(zero_download_rows),
+        "generated_at": datetime.now().isoformat(),
+        "latest_snapshot": latest_snapshot,
+        "freshness_days": freshness_days,
     }

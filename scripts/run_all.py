@@ -3,6 +3,11 @@ import subprocess
 import sys
 import time
 
+try:
+    from scripts.pipeline_lock import PipelineLock
+except ModuleNotFoundError:
+    from pipeline_lock import PipelineLock
+
 scripts = [
     ("01_seed_tools.py", "Seeding tool universe"),
     ("02_search_adoption.py", "Searching GitHub for adoption data"),
@@ -10,18 +15,20 @@ scripts = [
     ("04_compute_scores.py", "Computing scores and insights"),
     ("05_fetch_downloads.py", "Fetching npm and PyPI download counts"),
     ("06_fetch_contributors.py", "Fetching contributor intelligence"),
+    ("08_enrich_health.py", "Enriching dependency health data"),
 ]
 
 print("\n🔧 Under The Hood — Data Pipeline")
 print("=" * 50)
 
-for filename, description in scripts:
-    path = os.path.join("scripts", filename)
-    print(f"\n▶  {description}")
-    print(f"   Running: {path}")
-    result = subprocess.run([sys.executable, path], check=False)
-    if result.returncode != 0:
-        print(f"   ⚠️  Exited with code {result.returncode}. Continuing...")
-    time.sleep(2)
+with PipelineLock():
+    for filename, description in scripts:
+        path = os.path.join("scripts", filename)
+        print(f"\n▶  {description}")
+        print(f"   Running: {path}")
+        result = subprocess.run([sys.executable, path], check=False)
+        if result.returncode != 0:
+            print(f"   ⚠️  Exited with code {result.returncode}. Continuing...")
+        time.sleep(2)
 
 print("\n✅ Pipeline complete. Run: flask --app web.app run --host 0.0.0.0 --port 8000")

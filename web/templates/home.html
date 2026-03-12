@@ -38,11 +38,16 @@
       <p>{{ m.description }}</p>
       <hr>
       <ul class="metric-list">
-        <li>Used in: <strong>{{ "{:,}".format(m.total_repos|int) }}</strong> <span>(repositories using this tool)</span></li>
+        <li>
+          Used in: <strong>{{ "{:,}".format(m.total_repos|int) }}</strong> <span>(repositories using this tool)</span>
+          {% if m.show_repos_delta %}
+          <span class="metric-inline-delta {{ m.repos_delta_class }}">{{ m.repos_delta_display }} this week</span>
+          {% endif %}
+        </li>
         <li>New (90d): <strong>{{ "{:,}".format(m.new_repos_90d|int) }}</strong> <span>(new repositories that started using it recently)</span></li>
         <li>Activity: <strong>{{ "%.0f"|format(m.activity_pct) }}%</strong> <span>(share of using repositories updated in the last 30 days)</span></li>
       </ul>
-      <div class="small-note confidence-line">{{ confidence_badge(m.confidence_tier, m.sample_size) }}</div>
+      <div class="small-note confidence-line">{{ confidence_badge(m.confidence_tier, m.confidence_tooltip) }}</div>
       {% if m.low_confidence %}
       <div class="small-note low-confidence-note">Low confidence — directional only.</div>
       {% endif %}
@@ -56,6 +61,11 @@
   <div class="radar-banner-title">🔭 The Radar — {{ radar_count }} tools in the pre-commercial window</div>
   <div class="radar-banner-sub">Tools small enough to still be early, growing fast enough to be a signal.</div>
   <a class="radar-banner-link radar-cta" href="{{ url_for('radar') }}">View The Radar →</a>
+</section>
+
+<section class="radar-banner health-callout">
+  <div class="radar-banner-title">🏥 Tool Health Rankings — see which fast-growing tools are safe to build on</div>
+  <a class="radar-banner-link radar-cta" href="{{ url_for('health_page') }}">View Rankings →</a>
 </section>
 
 <section>

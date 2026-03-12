@@ -92,6 +92,10 @@
   {% endif %}
 
   <div class="memo-divider"></div>
+  <div class="memo-section-label">Dependency Health</div>
+  <p class="memo-body">{{ memo.health_section }}</p>
+
+  <div class="memo-divider"></div>
   <div class="memo-section-label">What To Watch</div>
   {% for item in memo.watch_items %}
     {% if item.startswith('**') %}
@@ -129,6 +133,9 @@ WHO'S BUILDING THE LEADER
 
 ENTERPRISE VALIDATION
 {{ memo.enterprise_section }}
+
+DEPENDENCY HEALTH
+{{ memo.health_section }}
 
 WHAT TO WATCH
 {% for item in memo.watch_items %}{{ item }}

@@ -1,17 +1,22 @@
 from __future__ import annotations
 
+import math
+
 import plotly.graph_objects as go
 from flask import Flask, redirect, render_template, request, url_for
 
 from web.data import (
     confidence_badge_copy,
     db_has_data,
+    format_delta,
     format_activity_signal,
     generate_tool_insight,
     get_all_categories,
     get_all_tools,
     get_category_tools,
     get_download_history,
+    get_health_leaderboard,
+    get_ops_data,
     generate_category_memo,
     get_pre_commercial_signal,
     get_radar_snapshot,
@@ -63,12 +68,49 @@ def format_followers(value: int | float) -> str:
     return f"{int(n):,}"
 
 
+def format_compact_delta(num: int | float) -> str:
+    n = int(num or 0)
+    if n == 0:
+        return "—"
+    sign = "+" if n > 0 else ""
+    abs_n = abs(n)
+    if abs_n >= 1_000_000:
+        return f"{sign}{(n / 1_000_000):.1f}M"
+    if abs_n >= 1_000:
+        return f"{sign}{(n / 1_000):.1f}K"
+    return f"{sign}{n:,}"
+
+
 def phase_short_label(phase: str) -> str:
     if phase == "Mature":
         return "One tool has won"
     if phase == "Consolidating":
         return "A winner is emerging"
     return "No clear winner yet — this is an active competition"
+
+
+def format_days_ago(days: int | None) -> str:
+    if days is None:
+        return "unknown"
+    if days < 30:
+        return f"{days} days ago"
+    if days < 365:
+        months = max(1, int(round(days / 30)))
+        return f"{months} month{'s' if months != 1 else ''} ago"
+    years = max(1, int(round(days / 365)))
+    return f"{years} year{'s' if years != 1 else ''} ago"
+
+
+def health_tier_meta(tier: str) -> tuple[str, str]:
+    if tier == "Healthy":
+        return "✅", "health-tier-healthy"
+    if tier == "Monitoring Required":
+        return "⚠️", "health-tier-monitoring"
+    if tier == "Declining Health":
+        return "🔴", "health-tier-declining"
+    if tier == "Critical Concerns":
+        return "❌", "health-tier-critical"
+    return "❓", "health-tier-unknown"
 
 
 @app.context_processor
@@ -121,7 +163,14 @@ def home():
         row["activity_pct"] = (int(row["active_repos"]) / max(1, int(row["total_repos"]))) * 100
         row["confidence_tier"] = row.get("confidence_tier") or "Low"
         row["sample_size"] = int(row.get("sample_size") or row.get("total_repos") or 0)
-        row["confidence_tooltip"] = confidence_badge_copy(row["confidence_tier"], row["sample_size"])
+        row["confidence_tooltip"] = (
+            row.get("confidence_tooltip")
+            or confidence_badge_copy(row["confidence_tier"], row["sample_size"])
+        )
+        row["trend_reliable"] = int(row.get("is_trend_reliable") or 0) == 1
+        repos_delta = int(row.get("repos_delta_7d") or 0)
+        row["repos_delta_display"], row["repos_delta_class"] = format_delta(repos_delta)
+        row["show_repos_delta"] = not (repos_delta == 0 and not row["trend_reliable"])
         row["low_confidence"] = row["sample_size"] < 15 or row["confidence_tier"] == "Low"
 
     return render_template(
@@ -163,13 +212,94 @@ def tool_detail():
     active_pct = (int(tool["active_repos"]) / max(1, int(tool["total_repos"]))) * 100
     sample_size = int(tool.get("sample_size") or tool.get("total_repos") or 0)
     confidence_tier = tool.get("confidence_tier") or "Low"
-    confidence_tooltip = confidence_badge_copy(confidence_tier, sample_size)
+    confidence_tooltip = tool.get("confidence_tooltip") or confidence_badge_copy(
+        confidence_tier, sample_size
+    )
     trend_reliable = int(tool.get("is_trend_reliable") or 0) == 1
     weekly_downloads = int(tool.get("weekly_downloads") or 0)
+    repos_delta_7d = int(tool.get("repos_delta_7d") or 0)
+    downloads_delta_7d = int(tool.get("downloads_delta_7d") or 0)
+    repos_delta_display, repos_delta_class = format_delta(repos_delta_7d)
+    downloads_delta_display, downloads_delta_class = format_delta(downloads_delta_7d)
+    show_repos_delta = not (repos_delta_7d == 0 and not trend_reliable)
+    show_downloads_delta = not (downloads_delta_7d == 0 and not trend_reliable)
     downloads_source = tool.get("downloads_source")
     usage_model = tool.get("usage_model") or "dependency_first"
     has_downloads = bool(downloads_source)
     download_history = get_download_history(canonical)
+
+    health = tool.get("health") or {}
+    has_health_data = bool(health)
+    deps_dev_found = int(health.get("deps_dev_found") or 0) if has_health_data else 0
+    osv_found = int(health.get("osv_found") or 0) if has_health_data else 0
+    show_health_section = has_health_data
+    health_data_available = deps_dev_found == 1 or osv_found == 1
+
+    health_score = float(health.get("health_score") or 0) if has_health_data else 0.0
+    health_tier = str(health.get("health_tier") or "Unknown") if has_health_data else "Unknown"
+    health_reason = str(health.get("health_tier_reason") or "") if has_health_data else ""
+    health_icon, health_tier_class = health_tier_meta(health_tier)
+
+    last_release_days = health.get("last_release_days") if has_health_data else None
+    if isinstance(last_release_days, (int, float)):
+        last_release_days_int = int(last_release_days)
+    else:
+        last_release_days_int = None
+    last_release_text = format_days_ago(last_release_days_int)
+    if last_release_days_int is None:
+        last_release_class = "health-muted"
+    elif last_release_days_int <= 30:
+        last_release_class = "health-good"
+    elif last_release_days_int <= 90:
+        last_release_class = "health-default"
+    elif last_release_days_int <= 180:
+        last_release_class = "health-warn"
+    else:
+        last_release_class = "health-bad"
+
+    advisory_total = int(health.get("advisory_total") or 0) if has_health_data else 0
+    advisory_critical = int(health.get("advisory_critical") or 0) if has_health_data else 0
+    advisory_high = int(health.get("advisory_high") or 0) if has_health_data else 0
+    if advisory_total == 0:
+        advisory_text = "None"
+        advisory_class = "health-good"
+    elif advisory_total <= 2:
+        advisory_text = f"{advisory_total} advisories ({advisory_critical}C {advisory_high}H)"
+        advisory_class = "health-warn"
+    else:
+        advisory_text = f"{advisory_total} advisories ({advisory_critical}C {advisory_high}H)"
+        advisory_class = "health-bad"
+
+    transitive_dep_count = health.get("transitive_dep_count") if has_health_data else None
+    if isinstance(transitive_dep_count, (int, float)):
+        transitive_dep_count_int = int(transitive_dep_count)
+    else:
+        transitive_dep_count_int = None
+    transitive_dep_text = (
+        f"{transitive_dep_count_int:,} packages" if transitive_dep_count_int is not None else "unknown"
+    )
+    if transitive_dep_count_int is None:
+        transitive_dep_class = "health-muted"
+    elif transitive_dep_count_int <= 50:
+        transitive_dep_class = "health-good"
+    elif transitive_dep_count_int <= 200:
+        transitive_dep_class = "health-default"
+    elif transitive_dep_count_int <= 500:
+        transitive_dep_class = "health-warn"
+    else:
+        transitive_dep_class = "health-bad"
+
+    license_value = str(health.get("license") or "") if has_health_data else ""
+    license_is_permissive = int(health.get("license_is_permissive") or 0) if has_health_data else 0
+    if not license_value:
+        license_text = "unknown"
+        license_class = "health-muted"
+    elif license_is_permissive == 1:
+        license_text = license_value
+        license_class = "health-good"
+    else:
+        license_text = f"{license_value} (non-permissive)"
+        license_class = "health-warn"
 
     version_chart_html = ""
     if tool.get("version_spread"):
@@ -237,10 +367,32 @@ def tool_detail():
         sample_size=sample_size,
         trend_reliable=trend_reliable,
         weekly_downloads=weekly_downloads,
+        repos_delta_display=repos_delta_display,
+        repos_delta_class=repos_delta_class,
+        show_repos_delta=show_repos_delta,
+        downloads_delta_display=downloads_delta_display,
+        downloads_delta_class=downloads_delta_class,
+        show_downloads_delta=show_downloads_delta,
+        downloads_delta_compact=format_compact_delta(downloads_delta_7d),
         downloads_source=downloads_source,
         usage_model=usage_model,
         has_downloads=has_downloads,
         download_history=download_history,
+        show_health_section=show_health_section,
+        health_data_available=health_data_available,
+        health_score=health_score,
+        health_tier=health_tier,
+        health_reason=health_reason,
+        health_icon=health_icon,
+        health_tier_class=health_tier_class,
+        last_release_text=last_release_text,
+        last_release_class=last_release_class,
+        advisory_text=advisory_text,
+        advisory_class=advisory_class,
+        transitive_dep_text=transitive_dep_text,
+        transitive_dep_class=transitive_dep_class,
+        license_text=license_text,
+        license_class=license_class,
         version_chart_html=version_chart_html,
         trend_chart_html=trend_chart_html,
     )
@@ -314,7 +466,14 @@ def category_view():
             row_class = "row-red"
         confidence_tier = t.get("confidence_tier") or "Low"
         sample_size = int(t.get("sample_size") or t.get("total_repos") or 0)
-        confidence_tooltip = confidence_badge_copy(confidence_tier, sample_size)
+        confidence_tooltip = (
+            t.get("confidence_tooltip")
+            or confidence_badge_copy(confidence_tier, sample_size)
+        )
+        trend_reliable = int(t.get("is_trend_reliable") or 0) == 1
+        repos_delta = int(t.get("repos_delta_7d") or 0)
+        repos_delta_display, repos_delta_class = format_delta(repos_delta)
+        show_repos_delta = not (repos_delta == 0 and not trend_reliable)
         rows.append(
             {
                 "tool": t["display_name"],
@@ -332,6 +491,10 @@ def category_view():
                 "confidence_tier": confidence_tier,
                 "confidence_tooltip": confidence_tooltip,
                 "sample_size": sample_size,
+                "repos_delta_7d": repos_delta,
+                "repos_delta_display": repos_delta_display,
+                "repos_delta_class": repos_delta_class,
+                "show_repos_delta": show_repos_delta,
                 "what": (t["description"][:57] + "...") if len(t["description"]) > 60 else t["description"],
                 "row_class": row_class,
             }
@@ -368,6 +531,109 @@ def memo():
     )
 
 
+@app.route("/health")
+def health_page():
+    if not db_has_data():
+        return render_template("empty.html", page_title="Tool Health Rankings")
+
+    category_filter = request.args.get("category", "").strip()
+    tier_filter = request.args.get("tier", "").strip()
+
+    df = get_health_leaderboard(
+        category=category_filter or None,
+        tier=tier_filter or None,
+    )
+    base_df = get_health_leaderboard(category=category_filter or None, tier=None)
+    categories = get_all_categories()
+
+    tools = df.to_dict("records") if not df.empty else []
+    for row in tools:
+        tier = str(row.get("health_tier") or "Unknown")
+        icon, tier_class = health_tier_meta(tier)
+        row["health_icon"] = icon
+        row["health_tier_class"] = tier_class
+        row["health_score"] = float(row.get("health_score") or 0)
+        row["health_score_pct"] = max(0, min(100, int(round(row["health_score"]))))
+
+        signal, _, _ = signal_label(float(row.get("emergence_score") or 0), int(row.get("total_repos") or 0))
+        icon_map = {
+            "Breakout": "🚀 Breakout",
+            "Rising": "↑ Rising",
+            "Fading": "↓ Fading",
+            "Stable": "→ Stable",
+            "Active": "→ Active",
+            "Dominant": "👑 Dominant",
+        }
+        row["momentum_label"] = icon_map.get(signal, signal)
+
+        advisories_total = int(row.get("advisory_total") or 0)
+        advisories_critical = int(row.get("advisory_critical") or 0)
+        advisories_high = int(row.get("advisory_high") or 0)
+        if advisories_total == 0:
+            row["advisories_text"] = "None"
+            row["advisories_class"] = "health-good"
+        else:
+            row["advisories_text"] = f"{advisories_critical}C {advisories_high}H"
+            row["advisories_class"] = "health-warn" if advisories_total <= 2 else "health-bad"
+
+        last_release_days = row.get("last_release_days")
+        if isinstance(last_release_days, float) and math.isnan(last_release_days):
+            row["last_release_text"] = "unknown"
+        elif isinstance(last_release_days, (int, float)):
+            row["last_release_text"] = format_days_ago(int(last_release_days))
+        else:
+            row["last_release_text"] = "unknown"
+
+        enterprise_count = int(row.get("enterprise_repo_count") or 0)
+        row["enterprise_text"] = f"{enterprise_count} orgs" if enterprise_count > 0 else "—"
+
+        if tier == "Healthy":
+            row["health_row_class"] = "health-row-healthy"
+        elif tier == "Monitoring Required":
+            row["health_row_class"] = "health-row-monitoring"
+        elif tier in {"Declining Health", "Critical Concerns"}:
+            row["health_row_class"] = "health-row-critical"
+        else:
+            row["health_row_class"] = "row-default"
+
+    if base_df.empty:
+        healthy_count = 0
+        monitoring_count = 0
+        declining_count = 0
+        critical_count = 0
+        known_count = 0
+    else:
+        healthy_count = int((base_df["health_tier"] == "Healthy").sum())
+        monitoring_count = int((base_df["health_tier"] == "Monitoring Required").sum())
+        declining_count = int((base_df["health_tier"] == "Declining Health").sum())
+        critical_count = int((base_df["health_tier"] == "Critical Concerns").sum())
+        known_count = int(len(base_df))
+
+    total_tools_in_scope = len(get_all_tools(category=category_filter or None))
+    unknown_count = max(0, total_tools_in_scope - known_count)
+    critical_or_unknown = critical_count + unknown_count
+
+    return render_template(
+        "health.html",
+        page_title="Tool Health Rankings",
+        tools=tools,
+        categories=categories,
+        selected_category=category_filter,
+        selected_tier=tier_filter,
+        total_count=len(tools),
+        healthy_count=healthy_count,
+        monitoring_count=monitoring_count,
+        declining_count=declining_count,
+        critical_or_unknown_count=critical_or_unknown,
+    )
+
+
+@app.get("/ops")
+def ops():
+    data = get_ops_data()
+    return render_template("ops.html", page_title="Ops", data=data)
+
+
 @app.get("/radar")
 def radar():
     if not db_has_data():
@@ -376,6 +642,15 @@ def radar():
     radar_snapshot = get_radar_snapshot()
     tools = radar_snapshot["tools"]
     for tool in tools:
+        tool["confidence_tooltip"] = tool.get("confidence_tooltip") or confidence_badge_copy(
+            tool.get("confidence_tier") or "Low",
+            int(tool.get("sample_size") or tool.get("total_repos") or 0),
+        )
+        trend_reliable = int(tool.get("is_trend_reliable") or 0) == 1
+        repos_delta = int(tool.get("repos_delta_7d") or 0)
+        tool["repos_delta_display"], tool["repos_delta_class"] = format_delta(repos_delta)
+        tool["show_repos_delta"] = not (repos_delta == 0 and not trend_reliable)
+
         contributors = get_tool_top_contributors(tool["canonical_name"], limit=3)
         top_builders = []
         for c in contributors:

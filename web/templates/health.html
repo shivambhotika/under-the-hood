@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block content %}
+<section>
+  <h1>Tool Health Rankings</h1>
+  <p class="subtitle">
+    How robust are the tools gaining adoption?<br>
+    Growing fast is one signal. Being safe to build on is another.<br>
+    This page shows both together.
+  </p>
+</section>
+
+<section class="card health-filter-card">
+  <form method="get" action="{{ url_for('health_page') }}" class="health-filter-form">
+    <div>
+      <label for="category">Category</label>
+      <select id="category" name="category" onchange="this.form.submit()">
+        <option value="">All</option>
+        {% for c in categories %}
+        <option value="{{ c.category }}" {% if c.category == selected_category %}selected{% endif %}>{{ c.category }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="tier">Health tier</label>
+      <select id="tier" name="tier" onchange="this.form.submit()">
+        <option value="">All</option>
+        <option value="Healthy" {% if selected_tier == 'Healthy' %}selected{% endif %}>Healthy</option>
+        <option value="Monitoring Required" {% if selected_tier == 'Monitoring Required' %}selected{% endif %}>Monitoring Required</option>
+        <option value="Declining Health" {% if selected_tier == 'Declining Health' %}selected{% endif %}>Declining Health</option>
+        <option value="Critical Concerns" {% if selected_tier == 'Critical Concerns' %}selected{% endif %}>Critical Concerns</option>
+      </select>
+    </div>
+  </form>
+</section>
+
+<section class="cards health-summary-cards">
+  <article class="card health-summary health-summary-healthy">
+    <div class="label">Healthy tools</div>
+    <div class="value">{{ healthy_count }}</div>
+  </article>
+  <article class="card health-summary health-summary-monitoring">
+    <div class="label">Monitoring Required</div>
+    <div class="value">{{ monitoring_count }}</div>
+  </article>
+  <article class="card health-summary health-summary-declining">
+    <div class="label">Declining Health</div>
+    <div class="value">{{ declining_count }}</div>
+  </article>
+  <article class="card health-summary health-summary-critical">
+    <div class="label">Critical + Unknown</div>
+    <div class="value">{{ critical_or_unknown_count }}</div>
+  </article>
+</section>
+
+{% if not tools %}
+<section class="card">
+  <h2>No health data available yet.</h2>
+  <p class="subtitle">Run <code>python3 scripts/08_enrich_health.py</code> to populate health signals, then refresh this page.</p>
+</section>
+{% else %}
+<section>
+  <h2>Ranked tools ({{ total_count }})</h2>
+  <div class="table-wrap desktop-table">
+    <table class="health-table">
+      <thead>
+        <tr>
+          <th>Tool</th>
+          <th>Category</th>
+          <th>Health</th>
+          <th>Score</th>
+          <th>Momentum</th>
+          <th>Advisories</th>
+          <th>Last Release</th>
+          <th>Enterprise</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in tools %}
+        <tr class="{{ t.health_row_class }}">
+          <td>
+            <div><strong>{{ t.display_name }}</strong></div>
+            <div class="health-ecosystem-row">
+              <span class="pill">{{ t.ecosystem }}</span>
+            </div>
+          </td>
+          <td>{{ t.category }}</td>
+          <td class="health-tier-cell {{ t.health_tier_class }}">{{ t.health_icon }} {{ t.health_tier }}</td>
+          <td>
+            <div class="health-score-number">{{ "%.1f"|format(t.health_score|float) }}</div>
+            <div class="health-score-bar">
+              <span style="width: {{ t.health_score_pct }}%"></span>
+            </div>
+          </td>
+          <td>{{ t.momentum_label }}</td>
+          <td class="{{ t.advisories_class }}">{{ t.advisories_text }}</td>
+          <td>{{ t.last_release_text }}</td>
+          <td>{{ t.enterprise_text }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="mobile-tool-cards health-mobile-cards">
+    {% for t in tools %}
+    <article class="card mobile-tool-card {{ t.health_row_class }}">
+      <div class="mobile-tool-head">
+        <h3>{{ t.display_name }}</h3>
+        <span class="pill">{{ t.health_icon }} {{ t.health_tier }}</span>
+      </div>
+      <ul class="metric-list">
+        <li>Score: <strong>{{ "%.1f"|format(t.health_score|float) }} / 100</strong></li>
+        <li>Momentum: <strong>{{ t.momentum_label }}</strong></li>
+        <li>Advisories: <strong class="{{ t.advisories_class }}">{{ t.advisories_text }}</strong></li>
+        <li>Last release: <strong>{{ t.last_release_text }}</strong></li>
+        <li>Enterprise: <strong>{{ t.enterprise_text }}</strong></li>
+      </ul>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+<section class="explainer-band">
+  <strong>How to use this table</strong><br>
+  The most investable tools sit in the top-left of the signal space:
+  high health score AND rising momentum. That means a tool that is
+  growing quickly AND safe to build on.<br><br>
+  Health Score factors: release cadence, known vulnerabilities,
+  transitive dependency count, maintainer concentration, and license type.<br><br>
+  Momentum comes from adoption growth across tracked repositories.<br><br>
+  A tool can be Healthy but Stable (established infrastructure) or
+  Declining Health but Rising (growing fast but accumulating tech debt).
+  The intersection tells you the most.
+</section>
+{% endblock %}

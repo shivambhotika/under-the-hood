@@ -54,7 +54,12 @@ CREATE TABLE IF NOT EXISTS tool_snapshots (
     downloads_source TEXT,
     sample_size INTEGER DEFAULT 0,
     confidence_tier TEXT DEFAULT 'Low',
+    sample_tier TEXT DEFAULT 'Low',
+    trend_tier TEXT DEFAULT 'Early',
+    confidence_tooltip TEXT,
     is_trend_reliable INTEGER DEFAULT 0,
+    repos_delta_7d INTEGER DEFAULT 0,
+    downloads_delta_7d INTEGER DEFAULT 0,
     last_ecosystem_activity TEXT,
     days_since_ecosystem_activity INTEGER,
     active_builder_count INTEGER DEFAULT 0,
@@ -162,6 +167,58 @@ CREATE TABLE IF NOT EXISTS download_snapshots (
     FOREIGN KEY (canonical_name) REFERENCES tools(canonical_name)
 );
 
+-- Dependency and vulnerability health signals by tool
+CREATE TABLE IF NOT EXISTS tool_health (
+    canonical_name TEXT PRIMARY KEY,
+
+    -- Release health
+    last_release_days INTEGER,
+    latest_version TEXT,
+
+    -- Dependency complexity
+    direct_dep_count INTEGER,
+    transitive_dep_count INTEGER,
+
+    -- License
+    license TEXT,
+    license_is_permissive INTEGER,
+
+    -- Vulnerabilities (from OSV)
+    advisory_critical INTEGER DEFAULT 0,
+    advisory_high INTEGER DEFAULT 0,
+    advisory_medium INTEGER DEFAULT 0,
+    advisory_low INTEGER DEFAULT 0,
+    advisory_total INTEGER DEFAULT 0,
+
+    -- Computed score
+    health_score REAL DEFAULT 0,
+    health_tier TEXT DEFAULT 'Unknown',
+    health_tier_reason TEXT,
+
+    -- Data quality
+    deps_dev_found INTEGER DEFAULT 0,
+    osv_found INTEGER DEFAULT 0,
+    fetched_at TEXT,
+
+    FOREIGN KEY (canonical_name) REFERENCES tools(canonical_name)
+);
+
+-- Pipeline run health logs
+CREATE TABLE IF NOT EXISTS pipeline_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_date TEXT NOT NULL,
+    run_type TEXT NOT NULL,
+    status TEXT NOT NULL,
+    duration_seconds REAL,
+    tools_processed INTEGER DEFAULT 0,
+    snapshots_created INTEGER DEFAULT 0,
+    downloads_fetched INTEGER DEFAULT 0,
+    contributors_fetched INTEGER DEFAULT 0,
+    validation_passed INTEGER DEFAULT 1,
+    notes TEXT,
+    completed_at TEXT
+);
+
 -- API response cache
 CREATE TABLE IF NOT EXISTS api_cache (
     cache_key TEXT PRIMARY KEY,
@@ -231,8 +288,38 @@ def run_migrations(conn: sqlite3.Connection) -> None:
     _ensure_column(
         conn,
         "tool_snapshots",
+        "sample_tier",
+        "sample_tier TEXT DEFAULT 'Low'",
+    )
+    _ensure_column(
+        conn,
+        "tool_snapshots",
+        "trend_tier",
+        "trend_tier TEXT DEFAULT 'Early'",
+    )
+    _ensure_column(
+        conn,
+        "tool_snapshots",
+        "confidence_tooltip",
+        "confidence_tooltip TEXT",
+    )
+    _ensure_column(
+        conn,
+        "tool_snapshots",
         "is_trend_reliable",
         "is_trend_reliable INTEGER DEFAULT 0",
+    )
+    _ensure_column(
+        conn,
+        "tool_snapshots",
+        "repos_delta_7d",
+        "repos_delta_7d INTEGER DEFAULT 0",
+    )
+    _ensure_column(
+        conn,
+        "tool_snapshots",
+        "downloads_delta_7d",
+        "downloads_delta_7d INTEGER DEFAULT 0",
     )
     _ensure_column(
         conn,
@@ -280,6 +367,49 @@ def run_migrations(conn: sqlite3.Connection) -> None:
             source TEXT NOT NULL,
             fetched_at TEXT,
             UNIQUE(canonical_name, snapshot_date),
+            FOREIGN KEY (canonical_name) REFERENCES tools(canonical_name)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS pipeline_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_date TEXT NOT NULL,
+            run_type TEXT NOT NULL,
+            status TEXT NOT NULL,
+            duration_seconds REAL,
+            tools_processed INTEGER DEFAULT 0,
+            snapshots_created INTEGER DEFAULT 0,
+            downloads_fetched INTEGER DEFAULT 0,
+            contributors_fetched INTEGER DEFAULT 0,
+            validation_passed INTEGER DEFAULT 1,
+            notes TEXT,
+            completed_at TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tool_health (
+            canonical_name TEXT PRIMARY KEY,
+            last_release_days INTEGER,
+            latest_version TEXT,
+            direct_dep_count INTEGER,
+            transitive_dep_count INTEGER,
+            license TEXT,
+            license_is_permissive INTEGER,
+            advisory_critical INTEGER DEFAULT 0,
+            advisory_high INTEGER DEFAULT 0,
+            advisory_medium INTEGER DEFAULT 0,
+            advisory_low INTEGER DEFAULT 0,
+            advisory_total INTEGER DEFAULT 0,
+            health_score REAL DEFAULT 0,
+            health_tier TEXT DEFAULT 'Unknown',
+            health_tier_reason TEXT,
+            deps_dev_found INTEGER DEFAULT 0,
+            osv_found INTEGER DEFAULT 0,
+            fetched_at TEXT,
             FOREIGN KEY (canonical_name) REFERENCES tools(canonical_name)
         )
         """
