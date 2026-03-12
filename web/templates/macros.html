@@ -1,17 +1,11 @@
-{% macro confidence_badge(tier, sample_size) %}
-{% if tier == 'High' %}
-<span class="confidence-badge confidence-high" title="Based on {{ sample_size }} repos — reliable signal">
-  ● High confidence
+{% macro confidence_badge(tier, tooltip='') %}
+<span class="confidence-badge confidence-{{ tier | lower }}"
+      title="{{ tooltip }}"
+      data-tooltip="{{ tooltip }}">
+  {% if tier == 'High' %}● High confidence
+  {% elif tier == 'Medium' %}● Medium confidence
+  {% else %}● Early signal{% endif %}
 </span>
-{% elif tier == 'Medium' %}
-<span class="confidence-badge confidence-medium" title="Based on {{ sample_size }} repos — reasonably reliable, building history">
-  ● Medium confidence
-</span>
-{% else %}
-<span class="confidence-badge confidence-low" title="Based on only {{ sample_size }} repos — treat as an early directional signal, not a firm conclusion">
-  ● Low confidence — directional only
-</span>
-{% endif %}
 {% endmacro %}
 
 {% macro trend_badge(is_reliable) %}

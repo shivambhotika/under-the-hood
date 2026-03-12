@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="ops-shell">
+  <div class="ops-header">
+    <h1>OPS DASHBOARD</h1>
+    <div class="ops-subtle">Under The Hood internal</div>
+  </div>
+
+  {% set summary = data.snapshot_summary or {} %}
+  {% set freshness = data.freshness_days %}
+  {% if freshness is not none and freshness == 0 %}
+    {% set freshness_class = 'ops-good' %}
+  {% elif freshness is not none and freshness < 8 %}
+    {% set freshness_class = 'ops-warn' %}
+  {% else %}
+    {% set freshness_class = 'ops-bad' %}
+  {% endif %}
+
+  <section class="ops-section">
+    <h2 class="ops-section-title">Latest Snapshot</h2>
+    <table class="ops-kv">
+      <tr>
+        <td>Snapshot date</td>
+        <td class="{{ freshness_class }}">{{ summary.latest_date or '—' }}</td>
+      </tr>
+      <tr>
+        <td>Tools with data</td>
+        <td>{{ summary.tool_count or 0 }}</td>
+      </tr>
+      <tr>
+        <td>Total repos tracked</td>
+        <td>{{ "{:,}".format(summary.total_repos|int) if summary.total_repos is not none else 0 }}</td>
+      </tr>
+      <tr>
+        <td>High confidence</td>
+        <td>{{ summary.high_conf or 0 }} tools</td>
+      </tr>
+      <tr>
+        <td>Medium confidence</td>
+        <td>{{ summary.med_conf or 0 }} tools</td>
+      </tr>
+      <tr>
+        <td>Low confidence</td>
+        <td>{{ summary.low_conf or 0 }} tools</td>
+      </tr>
+      <tr>
+        <td>With downloads</td>
+        <td>{{ summary.with_downloads or 0 }} tools</td>
+      </tr>
+      <tr>
+        <td>With week deltas</td>
+        <td>{{ summary.with_deltas or 0 }} tools</td>
+      </tr>
+    </table>
+  </section>
+
+  <section class="ops-section">
+    <h2 class="ops-section-title">Table Row Counts</h2>
+    <table class="ops-kv">
+      {% for table_name, count in data.table_counts.items() %}
+      <tr>
+        <td>{{ table_name }}</td>
+        <td>{{ count }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </section>
+
+  <section class="ops-section">
+    <h2 class="ops-section-title">Last 5 Pipeline Runs</h2>
+    {% if data.recent_runs %}
+    <table class="ops-table">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Type</th>
+          <th>Status</th>
+          <th>Duration</th>
+          <th>Validated</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for run in data.recent_runs %}
+        <tr>
+          <td>{{ run.run_date or '—' }}</td>
+          <td>{{ run.run_type or '—' }}</td>
+          <td>
+            <span class="status-chip status-{{ run.status or 'warning' }}">
+              {% if run.status == 'success' %}✅ success{% elif run.status == 'failed' %}❌ failed{% else %}⚠️ warning{% endif %}
+            </span>
+          </td>
+          <td>{{ "%.1fs"|format(run.duration_seconds|float) if run.duration_seconds is not none else '—' }}</td>
+          <td>{% if run.validation_passed %}✅ pass{% else %}❌ fail{% endif %}</td>
+          <td>{{ run.notes or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="card"><p class="subtitle">No runs recorded yet.</p></div>
+    {% endif %}
+  </section>
+
+  <section class="ops-section">
+    <h2 class="ops-section-title">Anomaly Flags</h2>
+    <h3>Zero-repo tools ({{ data.zero_repos_tools|length }})</h3>
+    {% if data.zero_repos_tools %}
+    <table class="ops-table">
+      <thead>
+        <tr>
+          <th>Tool</th>
+          <th>Ecosystem</th>
+          <th>Category</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in data.zero_repos_tools %}
+        <tr>
+          <td>{{ row.display_name }}</td>
+          <td>{{ row.ecosystem }}</td>
+          <td>{{ row.category }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="card"><p class="subtitle">None — looks good.</p></div>
+    {% endif %}
+
+    <h3>Zero-download tools ({{ data.zero_download_tools|length }})</h3>
+    {% if data.zero_download_tools %}
+    <table class="ops-table">
+      <thead>
+        <tr>
+          <th>Tool</th>
+          <th>Ecosystem</th>
+          <th>npm package</th>
+          <th>PyPI package</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in data.zero_download_tools %}
+        <tr>
+          <td>{{ row.display_name }}</td>
+          <td>{{ row.ecosystem }}</td>
+          <td>{{ row.npm_package or '—' }}</td>
+          <td>{{ row.pypi_package or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="card"><p class="subtitle">None — looks good.</p></div>
+    {% endif %}
+  </section>
+</section>
+{% endblock %}

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import argparse
 import math
 import os
 import re
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from statistics import median
 from typing import Any
 
@@ -269,7 +270,35 @@ def _compute_snapshot(conn, canonical_name: str) -> tuple[int, int, int, float, 
     return int(total), int(active), int(new_90), round(stars_median, 2), emergence
 
 
+def should_skip_tool(canonical_name: str, conn, force: bool = False) -> bool:
+    """
+    Returns True if this tool already has a snapshot for today.
+    Skipping avoids redundant API calls on re-runs.
+    Set force=True to override.
+    """
+    if force:
+        return False
+    today = date.today().isoformat()
+    existing = conn.execute(
+        """
+        SELECT total_repos
+        FROM tool_snapshots
+        WHERE canonical_name = ? AND snapshot_date = ?
+        """,
+        (canonical_name, today),
+    ).fetchone()
+    return existing is not None and int(existing["total_repos"] or 0) > 0
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-process all tools even if today's snapshot already exists",
+    )
+    args = parser.parse_args()
+
     init_db()
 
     with get_conn() as conn:
@@ -288,6 +317,9 @@ def main() -> None:
             ecosystem = tool["ecosystem"]
 
             print(f"[ {idx:>2}/{total_tools} ] {display_name} ({ecosystem}) ...")
+            if should_skip_tool(canonical_name, conn, force=args.force):
+                print(f"  -> ✓ {display_name} — already processed today, skipping")
+                continue
 
             manifest_counts: dict[str, int] = {}
             tool_used_cache = False

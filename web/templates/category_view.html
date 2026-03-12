@@ -60,6 +60,7 @@
         <tr>
           <th>Tool</th>
           <th>Used in</th>
+          <th>Δ 7d</th>
           <th>New (90d)</th>
           <th>Still Active</th>
           <th>Enterprise</th>
@@ -71,8 +72,15 @@
       <tbody>
         {% for r in rows %}
         <tr class="{{ r.row_class }}">
-          <td>{{ r.tool }} {{ confidence_badge(r.confidence_tier, r.sample_size) }}</td>
+          <td>{{ r.tool }} {{ confidence_badge(r.confidence_tier, r.confidence_tooltip) }}</td>
           <td>{{ r.used_in }}</td>
+          <td>
+            {% if r.show_repos_delta %}
+            <span class="{{ r.repos_delta_class }}">{{ r.repos_delta_display }}</span>
+            {% else %}
+            <span class="delta-none"></span>
+            {% endif %}
+          </td>
           <td>{{ r.new_90d }}</td>
           <td>{{ r.active }}</td>
           <td>{% if r.enterprise > 0 %}{{ r.enterprise }} orgs{% else %}—{% endif %}</td>
@@ -92,9 +100,12 @@
         <h3>{{ r.tool }}</h3>
         <span class="pill">{{ r.signal_text }}</span>
       </div>
-      <div class="small-note">{{ confidence_badge(r.confidence_tier, r.sample_size) }}</div>
+      <div class="small-note">{{ confidence_badge(r.confidence_tier, r.confidence_tooltip) }}</div>
       <ul class="metric-list">
         <li>Used in: <strong>{{ "{:,}".format(r.used_in_raw|int) }} repos</strong></li>
+        {% if r.show_repos_delta %}
+        <li>Δ 7d: <strong class="{{ r.repos_delta_class }}">{{ r.repos_delta_display }}</strong></li>
+        {% endif %}
         <li>New (90d): <strong>{{ "{:,}".format(r.new_90d_raw|int) }}</strong></li>
         <li>Still active: <strong>{{ "%.0f"|format(r.active_pct_raw) }}%</strong></li>
         <li>Enterprise: <strong>{% if r.enterprise > 0 %}{{ r.enterprise }} orgs{% else %}—{% endif %}</strong></li>

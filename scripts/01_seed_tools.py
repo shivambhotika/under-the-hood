@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import argparse
 from collections import Counter
+from urllib.parse import quote
+
+import requests
 
 try:
     from scripts.db import get_conn, init_db
@@ -206,7 +210,83 @@ PACKAGE_NAMES = {
 }
 
 
+def verify_package_exists(package_name: str, ecosystem: str) -> bool:
+    """
+    Quick registry existence check for package mappings.
+    """
+    if not package_name:
+        return False
+    try:
+        if ecosystem == "npm":
+            safe_package = quote(package_name, safe="@/")
+            url = f"https://registry.npmjs.org/{safe_package}/latest"
+            resp = requests.get(url, timeout=5)
+            return resp.status_code == 200
+        if ecosystem == "pypi":
+            pkg = package_name.lower().replace("_", "-")
+            url = f"https://pypi.org/pypi/{pkg}/json"
+            resp = requests.get(url, timeout=5)
+            return resp.status_code == 200
+    except Exception:
+        return False
+    return False
+
+
+def print_package_verification_report(conn) -> None:
+    rows = conn.execute(
+        """
+        SELECT canonical_name, ecosystem, npm_package, pypi_package
+        FROM tools
+        ORDER BY canonical_name
+        """
+    ).fetchall()
+
+    print("\nPackage Mapping Verification Report")
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    missing = 0
+    checked = 0
+
+    for row in rows:
+        ecosystem = row["ecosystem"]
+        canonical = row["canonical_name"]
+        if ecosystem == "npm":
+            pkg = (row["npm_package"] or canonical or "").strip()
+            if not pkg:
+                continue
+            ok = verify_package_exists(pkg, "npm")
+            checked += 1
+            if ok:
+                print(f"✅  {canonical:<18} npm:{pkg:<28} → found")
+            else:
+                print(f"⚠️  {canonical:<18} npm:{pkg:<28} → NOT FOUND (check mapping)")
+                missing += 1
+        elif ecosystem == "pypi":
+            pkg = (row["pypi_package"] or canonical or "").strip()
+            if not pkg:
+                continue
+            ok = verify_package_exists(pkg, "pypi")
+            checked += 1
+            if ok:
+                print(f"✅  {canonical:<18} pypi:{pkg:<27} → found")
+            else:
+                print(f"⚠️  {canonical:<18} pypi:{pkg:<27} → NOT FOUND (check mapping)")
+                missing += 1
+
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    print(f"{missing}/{checked} tools have missing or incorrect package mappings.")
+    if missing:
+        print("Fix these in PACKAGE_NAMES dict in 01_seed_tools.py.")
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--verify",
+        action="store_true",
+        help="Verify npm/pypi package mappings against package registries",
+    )
+    args = parser.parse_args()
+
     init_db()
     with get_conn() as conn:
         conn.executemany(
@@ -254,6 +334,8 @@ def main() -> None:
         category_rows = conn.execute(
             "SELECT category, COUNT(*) AS cnt FROM tools GROUP BY category ORDER BY category"
         ).fetchall()
+        if args.verify:
+            print_package_verification_report(conn)
 
     category_counter = Counter(t[3] for t in SEED_TOOLS)
     print(f"Seeded {len(SEED_TOOLS)} tools across {len(category_counter)} categories")

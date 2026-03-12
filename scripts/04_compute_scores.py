@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from statistics import median
 
 import math
@@ -107,22 +107,85 @@ def generate_insight(
     )
 
 
-def compute_confidence_tier(
-    total_repos: int, snapshot_count: int, metadata_coverage_pct: float = 100.0
-) -> str:
+def compute_confidence(total_repos: int, snapshot_count: int) -> tuple[str, str, str, str]:
     """
-    High:   50+ repos AND 4+ weekly snapshots
-    Medium: 15-49 repos OR (50+ repos but fewer than 4 snapshots)
-    Low:    under 15 repos
-    Always Low if metadata_coverage_pct < 60
+    Returns (tier, sample_tier, trend_tier, tooltip_text)
+
+    Sample tiers:
+        High:   50+ repos
+        Medium: 15-49 repos
+        Low:    under 15 repos
+
+    Trend tiers:
+        Stable:   4+ snapshots
+        Building: 2-3 snapshots
+        Early:    1 snapshot
+
+    Overall tier = weaker of the two.
     """
-    if metadata_coverage_pct < 60:
-        return "Low"
-    if total_repos >= 50 and snapshot_count >= 4:
-        return "High"
-    if total_repos >= 15:
-        return "Medium"
-    return "Low"
+    if total_repos >= 50:
+        sample_tier = "High"
+        sample_note = f"based on {total_repos} repos"
+    elif total_repos >= 15:
+        sample_tier = "Medium"
+        sample_note = f"based on {total_repos} repos — reasonable signal"
+    else:
+        sample_tier = "Low"
+        sample_note = f"only {total_repos} repos — treat as directional"
+
+    if snapshot_count >= 4:
+        trend_tier = "Stable"
+        trend_note = f"{snapshot_count} weeks of history"
+    elif snapshot_count >= 2:
+        trend_tier = "Building"
+        trend_note = f"{snapshot_count} snapshots — trend still forming"
+    else:
+        trend_tier = "Early"
+        trend_note = "1 snapshot — no trend data yet"
+
+    tier_rank = {"High": 3, "Medium": 2, "Low": 1, "Stable": 3, "Building": 2, "Early": 1}
+
+    if tier_rank[sample_tier] <= tier_rank.get(trend_tier, 1):
+        overall = sample_tier
+    else:
+        if trend_tier == "Early":
+            overall = "Low"
+        elif trend_tier == "Building":
+            overall = "Medium" if sample_tier == "High" else "Low"
+        else:
+            overall = sample_tier
+
+    tooltip = f"Sample: {sample_note} · Trend: {trend_note}"
+    return overall, sample_tier, trend_tier, tooltip
+
+
+def compute_deltas(canonical_name: str, today_total_repos: int, today_downloads: int, conn) -> tuple[int, int]:
+    """
+    Computes week-over-week change by comparing today's values
+    to the most recent snapshot from 5-9 days ago.
+    """
+    today = date.today()
+    window_start = (today - timedelta(days=9)).isoformat()
+    window_end = (today - timedelta(days=5)).isoformat()
+
+    prev = conn.execute(
+        """
+        SELECT total_repos, weekly_downloads
+        FROM tool_snapshots
+        WHERE canonical_name = ?
+          AND snapshot_date BETWEEN ? AND ?
+        ORDER BY snapshot_date DESC
+        LIMIT 1
+        """,
+        (canonical_name, window_start, window_end),
+    ).fetchone()
+
+    if not prev:
+        return 0, 0
+
+    repos_delta = int(today_total_repos or 0) - int(prev["total_repos"] or 0)
+    downloads_delta = int(today_downloads or 0) - int(prev["weekly_downloads"] or 0)
+    return repos_delta, downloads_delta
 
 
 def compute_is_trend_reliable(canonical_name: str, conn) -> int:
@@ -228,20 +291,6 @@ def recompute_today_snapshot(conn, canonical_name: str, snapshot_date: str) -> N
         (canonical_name,),
     ).fetchone()["cnt"]
 
-    metadata_coverage_row = conn.execute(
-        """
-        SELECT
-          COUNT(DISTINCT repo_full_name) AS total_cnt,
-          COUNT(DISTINCT CASE WHEN pushed_at IS NOT NULL OR created_at IS NOT NULL THEN repo_full_name END) AS covered_cnt
-        FROM tool_repos
-        WHERE canonical_name = ? AND stars > 0
-        """,
-        (canonical_name,),
-    ).fetchone()
-    total_cnt = int(metadata_coverage_row["total_cnt"] or 0)
-    covered_cnt = int(metadata_coverage_row["covered_cnt"] or 0)
-    metadata_coverage_pct = (covered_cnt / max(1, total_cnt)) * 100.0 if total_cnt else 0.0
-
     existing_snapshot = conn.execute(
         """
         SELECT COUNT(*) AS cnt
@@ -255,20 +304,33 @@ def recompute_today_snapshot(conn, canonical_name: str, snapshot_date: str) -> N
         (canonical_name,),
     ).fetchone()["cnt"]
     projected_snapshots = int(snapshot_count or 0) + (0 if int(existing_snapshot or 0) > 0 else 1)
-    tier = compute_confidence_tier(int(total), projected_snapshots, metadata_coverage_pct)
-    is_reliable = 1 if projected_snapshots >= 4 else 0
+    tier, sample_tier, trend_tier, confidence_tooltip = compute_confidence(int(total), projected_snapshots)
+    is_reliable = 1 if trend_tier == "Stable" else 0
     last_activity = compute_last_ecosystem_activity(canonical_name, conn)
     days_since_activity = compute_days_since_activity(last_activity)
     active_builder_count = compute_active_builder_count(canonical_name, conn)
+    today_downloads_row = conn.execute(
+        """
+        SELECT weekly_downloads
+        FROM tool_snapshots
+        WHERE canonical_name = ? AND snapshot_date = ?
+        """,
+        (canonical_name, snapshot_date),
+    ).fetchone()
+    today_downloads = int(today_downloads_row["weekly_downloads"] or 0) if today_downloads_row else 0
+    repos_delta_7d, downloads_delta_7d = compute_deltas(
+        canonical_name, int(total), int(today_downloads), conn
+    )
 
     conn.execute(
         """
         INSERT INTO tool_snapshots (
             canonical_name, snapshot_date, total_repos, active_repos,
             new_repos_90d, stars_median, emergence_score, enterprise_repo_count,
-            sample_size, confidence_tier, is_trend_reliable,
+            sample_size, confidence_tier, sample_tier, trend_tier, confidence_tooltip,
+            is_trend_reliable, repos_delta_7d, downloads_delta_7d,
             last_ecosystem_activity, days_since_ecosystem_activity, active_builder_count
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(canonical_name, snapshot_date) DO UPDATE SET
             total_repos=excluded.total_repos,
             active_repos=excluded.active_repos,
@@ -278,7 +340,12 @@ def recompute_today_snapshot(conn, canonical_name: str, snapshot_date: str) -> N
             enterprise_repo_count=excluded.enterprise_repo_count,
             sample_size=excluded.sample_size,
             confidence_tier=excluded.confidence_tier,
+            sample_tier=excluded.sample_tier,
+            trend_tier=excluded.trend_tier,
+            confidence_tooltip=excluded.confidence_tooltip,
             is_trend_reliable=excluded.is_trend_reliable,
+            repos_delta_7d=excluded.repos_delta_7d,
+            downloads_delta_7d=excluded.downloads_delta_7d,
             last_ecosystem_activity=excluded.last_ecosystem_activity,
             days_since_ecosystem_activity=excluded.days_since_ecosystem_activity,
             active_builder_count=excluded.active_builder_count
@@ -294,7 +361,12 @@ def recompute_today_snapshot(conn, canonical_name: str, snapshot_date: str) -> N
             int(enterprise_repo_count or 0),
             int(total),
             tier,
+            sample_tier,
+            trend_tier,
+            confidence_tooltip,
             int(is_reliable),
+            int(repos_delta_7d),
+            int(downloads_delta_7d),
             last_activity,
             days_since_activity,
             int(active_builder_count),
