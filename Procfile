@@ -1,1 +1,1 @@
-web: sh -c "python3 scripts/serve.py || python scripts/serve.py"
+web: python scripts/serve.py
