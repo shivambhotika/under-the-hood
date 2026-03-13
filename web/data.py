@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import shutil
 import sqlite3
 import time
 from datetime import date, datetime
@@ -16,12 +18,92 @@ except ModuleNotFoundError:
     from enterprise_orgs import ENTERPRISE_ORGS
     from db import init_db
 
-DB_PATH = Path(__file__).resolve().parent.parent / "data" / "uth.db"
+def _db_candidates() -> list[Path]:
+    here = Path(__file__).resolve()
+    candidates: list[Path] = []
+
+    env_path = os.getenv("UTH_DB_PATH")
+    if env_path:
+        candidates.append(Path(env_path))
+
+    candidates.extend(
+        [
+            here.parent.parent / "data" / "uth.db",
+            here.parents[2] / "data" / "uth.db" if len(here.parents) > 2 else here.parent.parent / "data" / "uth.db",
+            Path.cwd() / "data" / "uth.db",
+            Path("/var/task/user/data/uth.db"),
+            Path("/var/task/data/uth.db"),
+        ]
+    )
+
+    deduped: list[Path] = []
+    seen: set[str] = set()
+    for p in candidates:
+        key = str(p)
+        if key not in seen:
+            seen.add(key)
+            deduped.append(p)
+    return deduped
+
+
+def _resolve_db_path() -> Path:
+    candidates = _db_candidates()
+    for p in candidates:
+        if p.exists():
+            return p
+    return candidates[0]
+
+
+def _is_valid_db(path: Path) -> bool:
+    if not path.exists() or path.stat().st_size == 0:
+        return False
+    try:
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        tables = {
+            str(r["name"])
+            for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        }
+        conn.close()
+        return "tools" in tables and "tool_snapshots" in tables
+    except Exception:
+        return False
+
+
+def _prepare_runtime_db_path() -> Path:
+    global _RUNTIME_DB_PATH
+    if _RUNTIME_DB_PATH is not None:
+        return _RUNTIME_DB_PATH
+
+    chosen: Path | None = None
+    for p in _db_candidates():
+        if _is_valid_db(p):
+            chosen = p
+            break
+
+    if chosen is None:
+        chosen = _resolve_db_path()
+
+    # Serverless runtimes are safest reading sqlite from /tmp.
+    if os.getenv("VERCEL") and chosen.exists():
+        runtime_copy = Path("/tmp/uth.db")
+        try:
+            if (not runtime_copy.exists()) or runtime_copy.stat().st_size != chosen.stat().st_size:
+                shutil.copy2(chosen, runtime_copy)
+            _RUNTIME_DB_PATH = runtime_copy
+            return _RUNTIME_DB_PATH
+        except Exception:
+            pass
+
+    _RUNTIME_DB_PATH = chosen
+    return _RUNTIME_DB_PATH
+
 RADAR_MAX_REPOS = 400
 RADAR_TARGET_GROWTH_RATIO = 0.20
 RADAR_FALLBACK_GROWTH_RATIO = 0.15
 RADAR_MIN_TOTAL_REPOS = 8
 _SCHEMA_READY = False
+_RUNTIME_DB_PATH: Path | None = None
 
 NOTABLE_INSTITUTIONS = {
     "mit",
@@ -76,10 +158,16 @@ def cache_with_ttl(seconds: int = 3600) -> Callable:
 
 def _conn() -> sqlite3.Connection:
     global _SCHEMA_READY
+    db_path = _prepare_runtime_db_path()
     if not _SCHEMA_READY:
-        init_db()
+        if not db_path.exists():
+            init_db()
+            db_path = _prepare_runtime_db_path()
         _SCHEMA_READY = True
-    conn = sqlite3.connect(DB_PATH)
+    if db_path.exists():
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    else:
+        conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     return conn
 

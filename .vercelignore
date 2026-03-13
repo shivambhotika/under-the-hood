@@ -8,10 +8,6 @@ data/uth_full_backup.db
 data/*.db-shm
 data/*.db-wal
 
-# Keep only primary DB
-data/*.db
-!data/uth.db
-
 # Local env and generated artifacts
 .env
 .env.*
