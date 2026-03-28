@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block content %}
+<section>
+  <h1>What developer tools are actually getting adopted?</h1>
+  <p class="subtitle">
+    Tracking <strong>{{ "{:,}".format(stats.total_tools or 0) }} tools</strong> across
+    <strong>{{ "{:,}".format(stats.total_repos or 0) }} repository installs</strong>.
+  </p>
+</section>
+
+<section class="cards three">
+  <article class="card">
+    <div class="label">Tools tracked</div>
+    <div class="value">{{ "{:,}".format(stats.total_tools or 0) }}</div>
+  </article>
+  <article class="card">
+    <div class="label">Tracked installs</div>
+    <div class="value">{{ "{:,}".format(stats.total_repos or 0) }}</div>
+  </article>
+  <article class="card">
+    <div class="label">Latest snapshot</div>
+    <div class="value">{{ latest_snapshot_date }}</div>
+  </article>
+</section>
+
+<section>
+  <h2>Emerging tools</h2>
+  <div class="cards three">
+    {% for item in emerging %}
+    <article class="card">
+      <div class="label">{{ item.category }}</div>
+      <h3>{{ item.display_name }}</h3>
+      <p>{{ item.description or "No description yet." }}</p>
+      <ul class="metric-list">
+        <li>Repos: <strong>{{ "{:,}".format(item.total_repos or 0) }}</strong></li>
+        <li>New in 90d: <strong>{{ "{:,}".format(item.new_repos_90d or 0) }}</strong></li>
+        <li>Signal: <strong>{{ item.signal_label }}</strong></li>
+      </ul>
+      <a class="memo-inline-link" href="{{ url_for('tool_detail', name=item.canonical_name) }}">Open tool →</a>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+
+<section>
+  <h2>Categories</h2>
+  <div class="cards three">
+    {% for category in categories %}
+    <article class="card">
+      <div class="label">{{ category.market_phase or "Unknown phase" }}</div>
+      <h3>{{ category.category }}</h3>
+      <p>{{ category.insight_text or "No summary yet." }}</p>
+      <a class="memo-inline-link" href="{{ url_for('category_view', name=category.category) }}">Open category →</a>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

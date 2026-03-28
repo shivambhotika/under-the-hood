@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block content %}
+<section>
+  <h1>{{ org_name }}</h1>
+  <p class="subtitle">Tracked tools found in repositories owned by this organization.</p>
+</section>
+
+<section>
+  <div class="cards three">
+    {% for item in tools %}
+    <article class="card">
+      <div class="label">{{ item.category }}</div>
+      <h3>{{ item.display_name }}</h3>
+      <p>{{ item.repo_full_name }}</p>
+      <ul class="metric-list">
+        <li>Ecosystem: <strong>{{ item.ecosystem }}</strong></li>
+        <li>Total repos: <strong>{{ "{:,}".format(item.total_repos or 0) }}</strong></li>
+      </ul>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

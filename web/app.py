@@ -518,7 +518,7 @@ def compare_metric_row(
     return {"section": section, "label": label, "winner": winner}
 
 
-@app.route("/")
+@app.route("/", endpoint="home")
 def explore():
     if not db_has_data():
         return render_empty("Explore", "explore")
@@ -546,7 +546,7 @@ def explore():
     )
 
 
-@app.route("/category")
+@app.route("/category", endpoint="category_view")
 def category():
     if not db_has_data():
         return render_empty("Category View", "explore")
@@ -577,7 +577,7 @@ def category():
     )
 
 
-@app.route("/tool")
+@app.route("/tool", endpoint="tool_detail")
 def tool():
     if not db_has_data():
         return render_empty("Tool", "explore")

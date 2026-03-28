@@ -168,7 +168,10 @@ def _conn() -> sqlite3.Connection:
             db_path = _prepare_runtime_db_path()
         _SCHEMA_READY = True
     if db_path.exists():
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        except sqlite3.OperationalError:
+            conn = sqlite3.connect(db_path)
     else:
         conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
