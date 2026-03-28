@@ -71,7 +71,7 @@ def _is_valid_db(path: Path) -> bool:
 
 
 def _prepare_runtime_db_path() -> Path:
-    global _RUNTIME_DB_PATH
+    global _RUNTIME_DB_PATH, DB_PATH
     if _RUNTIME_DB_PATH is not None:
         return _RUNTIME_DB_PATH
 
@@ -91,11 +91,13 @@ def _prepare_runtime_db_path() -> Path:
             if (not runtime_copy.exists()) or runtime_copy.stat().st_size != chosen.stat().st_size:
                 shutil.copy2(chosen, runtime_copy)
             _RUNTIME_DB_PATH = runtime_copy
+            DB_PATH = _RUNTIME_DB_PATH
             return _RUNTIME_DB_PATH
         except Exception:
             pass
 
     _RUNTIME_DB_PATH = chosen
+    DB_PATH = _RUNTIME_DB_PATH
     return _RUNTIME_DB_PATH
 
 RADAR_MAX_REPOS = 400
@@ -104,6 +106,7 @@ RADAR_FALLBACK_GROWTH_RATIO = 0.15
 RADAR_MIN_TOTAL_REPOS = 8
 _SCHEMA_READY = False
 _RUNTIME_DB_PATH: Path | None = None
+DB_PATH: Path = _resolve_db_path()
 
 NOTABLE_INSTITUTIONS = {
     "mit",
@@ -207,6 +210,36 @@ def latest_snapshot_date() -> str | None:
     with _conn() as conn:
         row = conn.execute("SELECT MAX(snapshot_date) AS d FROM tool_snapshots").fetchone()
     return row["d"] if row and row["d"] else None
+
+
+@ttl_cache(900)
+def get_latest_snapshot_date() -> str:
+    """Returns the most recent snapshot date as a formatted string."""
+    result = latest_snapshot_date()
+    if not result:
+        return "No data yet"
+    try:
+        dt = datetime.strptime(result, "%Y-%m-%d")
+        return dt.strftime("%b %d, %Y")
+    except Exception:
+        return result
+
+
+@ttl_cache(900)
+def get_snapshot_freshness_status() -> str:
+    snapshot = latest_snapshot_date()
+    if not snapshot:
+        return "stale"
+    try:
+        dt = datetime.strptime(snapshot, "%Y-%m-%d").date()
+    except Exception:
+        return "aging"
+    age_days = (date.today() - dt).days
+    if age_days < 8:
+        return "fresh"
+    if age_days <= 21:
+        return "aging"
+    return "stale"
 
 
 @ttl_cache(900)
@@ -437,6 +470,42 @@ def get_all_categories() -> list[dict[str, Any]]:
 @ttl_cache(900)
 def get_category_tools(category: str) -> list[dict[str, Any]]:
     return get_all_tools(category=category)
+
+
+@cache_with_ttl(3600)
+def get_category_share_bars() -> dict[str, list[tuple[str, int]]]:
+    """
+    Returns category -> top tool share tuples for mini concentration bars.
+    """
+    today = latest_snapshot_date()
+    if not today:
+        return {}
+
+    result: dict[str, list[tuple[str, int]]] = {}
+    with _conn() as conn:
+        categories = conn.execute("SELECT DISTINCT category FROM tools ORDER BY category").fetchall()
+        for row in categories:
+            category = str(row["category"])
+            tools = conn.execute(
+                """
+                SELECT t.display_name, COALESCE(s.total_repos, 0) AS repos
+                FROM tools t
+                LEFT JOIN tool_snapshots s
+                  ON t.canonical_name = s.canonical_name
+                 AND s.snapshot_date = ?
+                WHERE t.category = ?
+                ORDER BY repos DESC
+                LIMIT 4
+                """,
+                (today, category),
+            ).fetchall()
+            total = sum(int(tool["repos"] or 0) for tool in tools) or 1
+            result[category] = [
+                (str(tool["display_name"]), round((int(tool["repos"] or 0) / total) * 100))
+                for tool in tools
+                if int(tool["repos"] or 0) > 0
+            ]
+    return result
 
 
 @ttl_cache(3600)
@@ -679,8 +748,80 @@ def get_radar_snapshot() -> dict[str, Any]:
     }
 
 
+@ttl_cache(1800)
+def get_weeks_on_radar(
+    canonical_name: str, max_repos: int = 400, min_growth_ratio: float = 0.20
+) -> int:
+    """
+    Counts consecutive weekly snapshots where this tool met Radar criteria.
+    """
+    with _conn() as conn:
+        snapshots = conn.execute(
+            """
+            SELECT snapshot_date, total_repos, new_repos_90d
+            FROM tool_snapshots
+            WHERE canonical_name = ?
+            ORDER BY snapshot_date DESC
+            LIMIT 12
+            """,
+            (canonical_name,),
+        ).fetchall()
+    if not snapshots:
+        return 0
+
+    weeks = 0
+    for snap in snapshots:
+        total = int(snap["total_repos"] or 0)
+        new_90d = int(snap["new_repos_90d"] or 0)
+        ratio = new_90d / max(1, total)
+        if total <= max_repos and ratio >= min_growth_ratio and total >= RADAR_MIN_TOTAL_REPOS:
+            weeks += 1
+        else:
+            break
+    return weeks
+
+
+@ttl_cache(1800)
 def get_radar_tools() -> list[dict[str, Any]]:
-    return get_radar_snapshot()["tools"]
+    snapshot = get_radar_snapshot()
+    tools = [dict(tool) for tool in snapshot["tools"]]
+    if not tools:
+        return []
+
+    today = latest_snapshot_date()
+    category_averages: dict[str, float] = {}
+    if today:
+        with _conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT t.category, AVG(s.emergence_score) AS avg_emergence
+                FROM tool_snapshots s
+                JOIN tools t ON s.canonical_name = t.canonical_name
+                WHERE s.snapshot_date = ?
+                GROUP BY t.category
+                """,
+                (today,),
+            ).fetchall()
+        for row in rows:
+            category_averages[str(row["category"])] = float(row["avg_emergence"] or 1)
+
+    min_growth_ratio = float(snapshot.get("growth_threshold") or RADAR_TARGET_GROWTH_RATIO)
+    for tool in tools:
+        cat_avg = category_averages.get(str(tool.get("category") or ""), 1.0)
+        ratio = round(float(tool.get("emergence_score") or 0) / max(0.1, cat_avg), 1)
+        tool["emergence_relative"] = ratio
+        if ratio >= 3:
+            tool["emergence_label"] = f"Growing {ratio:.0f}× faster than category average"
+        elif ratio >= 1.5:
+            tool["emergence_label"] = f"Growing {ratio:.1f}× faster than average"
+        else:
+            tool["emergence_label"] = "Near category average growth"
+        tool["weeks_on_radar"] = get_weeks_on_radar(
+            str(tool["canonical_name"]),
+            max_repos=RADAR_MAX_REPOS,
+            min_growth_ratio=min_growth_ratio,
+        )
+    return tools
 
 
 def signal_label(emergence_score: float, total_repos: int) -> tuple[str, str, str]:
@@ -836,6 +977,102 @@ def generate_health_section(top, top_health, runner_up, runner_up_health):
             base += f"Notably, {ru_name} scores higher at {ru_score:.0f}/100 despite lower adoption. "
 
     return base.strip()
+
+
+def generate_comparison_verdict(
+    tool_a: dict[str, Any],
+    tool_b: dict[str, Any],
+    health_a: dict[str, Any],
+    health_b: dict[str, Any],
+) -> str:
+    """Generates a 3-4 sentence plain-English comparison verdict."""
+    name_a = tool_a["display_name"]
+    name_b = tool_b["display_name"]
+    repos_a = int(tool_a.get("total_repos") or 0)
+    repos_b = int(tool_b.get("total_repos") or 0)
+    growth_a = int(tool_a.get("new_repos_90d") or 0)
+    growth_b = int(tool_b.get("new_repos_90d") or 0)
+    downloads_a = int(tool_a.get("weekly_downloads") or 0)
+    downloads_b = int(tool_b.get("weekly_downloads") or 0)
+    enterprise_a = int(tool_a.get("enterprise_repo_count") or 0)
+    enterprise_b = int(tool_b.get("enterprise_repo_count") or 0)
+    health_score_a = float(health_a.get("health_score") or 0)
+    health_score_b = float(health_b.get("health_score") or 0)
+
+    if growth_a > growth_b:
+        momentum = (
+            f"{name_a} is winning the greenfield race, with {growth_a:,} new adopters "
+            f"in the last 90 days versus {growth_b:,} for {name_b}."
+        )
+    elif growth_b > growth_a:
+        momentum = (
+            f"{name_b} is winning the greenfield race, with {growth_b:,} new adopters "
+            f"in the last 90 days versus {growth_a:,} for {name_a}."
+        )
+    else:
+        momentum = (
+            "Momentum is close: both tools added roughly the same number of "
+            "new adopters in the last 90 days."
+        )
+
+    if health_score_a > health_score_b:
+        health_line = (
+            f"{name_a} also looks healthier as a production dependency "
+            f"({health_score_a:.0f} vs {health_score_b:.0f}), which lowers maintenance risk."
+        )
+    elif health_score_b > health_score_a:
+        health_line = (
+            f"{name_b} looks healthier as a production dependency "
+            f"({health_score_b:.0f} vs {health_score_a:.0f}), which matters if your team wants lower operational drag."
+        )
+    else:
+        health_line = (
+            "Dependency health is effectively tied, so adoption and team fit matter more than maintenance risk here."
+        )
+
+    if repos_a > repos_b or downloads_a > downloads_b or enterprise_a > enterprise_b:
+        installed_base_winner = (
+            name_a
+            if (repos_a + downloads_a + enterprise_a) > (repos_b + downloads_b + enterprise_b)
+            else name_b
+        )
+        installed_base_other = name_b if installed_base_winner == name_a else name_a
+        base_line = (
+            f"{installed_base_winner} still has the larger installed base and validation footprint, "
+            f"so {installed_base_other} is the challenger rather than the incumbent."
+        )
+    else:
+        base_line = (
+            "Neither tool has clearly locked in the installed base yet, so this category still has room to move."
+        )
+
+    if growth_a > growth_b and health_score_a >= health_score_b:
+        recommendation = f"For a new build, {name_a} is the stronger default choice right now."
+    elif growth_b > growth_a and health_score_b >= health_score_a:
+        recommendation = f"For a new build, {name_b} is the stronger default choice right now."
+    else:
+        recommendation = (
+            "The practical decision depends on whether you value installed-base safety or forward momentum more."
+        )
+
+    verdict = " ".join([momentum, health_line, base_line, recommendation])
+
+    a_delta = int(tool_a.get("repos_delta_7d") or 0)
+    b_delta = int(tool_b.get("repos_delta_7d") or 0)
+    if a_delta > 0 and b_delta <= 0:
+        verdict += (
+            f" At current trajectory, {name_a} is gaining ground while {name_b} loses it — migration pressure is building."
+        )
+    elif b_delta > 0 and a_delta <= 0:
+        verdict += (
+            f" At current trajectory, {name_b} is gaining ground while {name_a} loses it — migration pressure is building."
+        )
+    elif a_delta > b_delta * 2 and a_delta > 0:
+        verdict += f" {name_a} is growing significantly faster week-over-week — the gap is likely to widen."
+    elif b_delta > a_delta * 2 and b_delta > 0:
+        verdict += f" {name_b} is growing significantly faster week-over-week — the gap is likely to widen."
+
+    return verdict
 
 
 @ttl_cache(1800)
@@ -1130,6 +1367,34 @@ def generate_category_memo(category: str) -> dict[str, Any] | None:
         "snapshot_date": snapshot_date,
         "generated_iso_date": date.today().isoformat(),
     }
+
+
+@cache_with_ttl(3600)
+def get_org_tools(org_name: str) -> list[dict[str, Any]]:
+    """Returns all tools used by repos in this org."""
+    today = latest_snapshot_date()
+    if not today:
+        return []
+    with _conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT
+                   t.display_name, t.canonical_name, t.category,
+                   t.ecosystem, t.description,
+                   tr.repo_full_name,
+                   COALESCE(s.total_repos, 0) AS total_repos,
+                   COALESCE(s.emergence_score, 0) AS emergence_score
+            FROM tool_repos tr
+            JOIN tools t ON tr.canonical_name = t.canonical_name
+            LEFT JOIN tool_snapshots s
+              ON t.canonical_name = s.canonical_name
+             AND s.snapshot_date = ?
+            WHERE LOWER(SUBSTR(tr.repo_full_name, 1, INSTR(tr.repo_full_name, '/') - 1)) = LOWER(?)
+            ORDER BY total_repos DESC, t.display_name ASC
+            """,
+            (today, org_name),
+        ).fetchall()
+    return _row_dicts(rows)
 
 
 def get_ops_data() -> dict[str, Any]:

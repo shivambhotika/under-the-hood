@@ -1,744 +1,884 @@
 from __future__ import annotations
 
+import logging
 import math
+import time
+from typing import Any
 
-try:
-    import plotly.graph_objects as go
-except ModuleNotFoundError:
-    go = None
 from flask import Flask, redirect, render_template, request, url_for
 
 from web.data import (
     confidence_badge_copy,
     db_has_data,
-    format_delta,
     format_activity_signal,
+    generate_comparison_verdict,
+    generate_category_memo,
     generate_tool_insight,
     get_all_categories,
     get_all_tools,
+    get_category_share_bars,
     get_category_tools,
-    get_download_history,
     get_health_leaderboard,
+    get_latest_snapshot_date,
     get_ops_data,
-    generate_category_memo,
+    get_org_tools,
     get_pre_commercial_signal,
     get_radar_snapshot,
     get_radar_tools,
+    get_snapshot_freshness_status,
     get_summary_stats,
-    get_tool_detail,
     get_tool_contributors,
+    get_tool_detail,
+    get_tool_health,
     get_tool_top_contributors,
-    get_top_movers,
     is_notable_contributor,
+    latest_snapshot_date,
     phase_explainer,
     signal_label,
 )
 
-BG = "#09090B"
-BG2 = "#0F0F12"
-TEXT_MUTED = "#A1A1AA"
-GREEN = "#22C55E"
-
-
 app = Flask(__name__, template_folder="templates", static_folder="static")
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
-def plotly_defaults() -> dict:
-    return dict(
-        paper_bgcolor=BG,
-        plot_bgcolor=BG2,
-        font=dict(family="IBM Plex Mono, monospace", color=TEXT_MUTED, size=11),
-        margin=dict(l=20, r=20, t=30, b=50),
-        showlegend=False,
-    )
+def check_startup_health() -> None:
+    """Runs on app startup. Logs warnings but never crashes the app."""
+    try:
+        import os
+
+        from web.data import DB_PATH, _conn
+
+        if not os.path.exists(DB_PATH):
+            logger.warning("DB file not found at %s — app will show empty state", DB_PATH)
+            return
+
+        conn = _conn()
+        count = conn.execute("SELECT COUNT(*) FROM tools").fetchone()[0]
+        snap_date = conn.execute("SELECT MAX(snapshot_date) FROM tool_snapshots").fetchone()[0]
+        conn.close()
+
+        logger.info("Startup health: %s tools, latest snapshot: %s", count, snap_date)
+
+        if count == 0:
+            logger.warning("No tools in DB — run scripts/01_seed_tools.py")
+        if not snap_date:
+            logger.warning("No snapshots — run scripts/run_all.py")
+    except Exception as exc:
+        logger.error("Startup health check failed: %s", exc)
 
 
-def format_compact(num: int | float) -> str:
-    n = float(num)
-    if n >= 1_000_000:
-        return f"{n / 1_000_000:.1f}M"
-    if n >= 1_000:
-        return f"{n / 1_000:.1f}K"
-    return f"{int(n):,}"
+check_startup_health()
 
 
-def format_followers(value: int | float) -> str:
-    n = float(value or 0)
-    if n >= 1_000_000:
-        return f"{n / 1_000_000:.1f}M"
-    if n >= 1_000:
-        return f"{n / 1_000:.1f}K"
-    return f"{int(n):,}"
-
-
-def format_compact_delta(num: int | float) -> str:
-    n = int(num or 0)
-    if n == 0:
+def format_number_value(n: Any) -> str:
+    if n is None:
         return "—"
-    sign = "+" if n > 0 else ""
-    abs_n = abs(n)
-    if abs_n >= 1_000_000:
-        return f"{sign}{(n / 1_000_000):.1f}M"
-    if abs_n >= 1_000:
-        return f"{sign}{(n / 1_000):.1f}K"
-    return f"{sign}{n:,}"
+    value = float(n)
+    if value >= 1_000_000:
+        return f"{value / 1_000_000:.1f}M"
+    if value >= 1_000:
+        return f"{value / 1_000:.1f}K"
+    return str(int(value))
 
 
-def phase_short_label(phase: str) -> str:
-    if phase == "Mature":
-        return "One tool has won"
-    if phase == "Consolidating":
-        return "A winner is emerging"
-    return "No clear winner yet — this is an active competition"
+def format_downloads_value(n: Any) -> str:
+    if not n:
+        return "—"
+    value = float(n)
+    if value >= 1_000_000:
+        return f"{value / 1_000_000:.1f}M"
+    if value >= 1_000:
+        return f"{value / 1_000:.0f}K"
+    return str(int(value))
 
 
-def format_days_ago(days: int | None) -> str:
+def format_delta_value(n: Any) -> str:
+    if not n:
+        return "—"
+    value = int(n)
+    return f"+{value:,}" if value > 0 else f"{value:,}"
+
+
+@app.template_filter("format_number")
+def format_number_filter(n: Any) -> str:
+    return format_number_value(n)
+
+
+@app.template_filter("format_downloads")
+def format_downloads_filter(n: Any) -> str:
+    return format_downloads_value(n)
+
+
+@app.template_filter("format_delta")
+def format_delta_filter(n: Any) -> str:
+    return format_delta_value(n)
+
+
+def signal_info(emergence_score: Any, total_repos: Any) -> tuple[str, str]:
+    score = float(emergence_score or 0)
+    total = int(total_repos or 0)
+    signal, _, _ = signal_label(score, total)
+    mapping = {
+        "Dominant": ("◆ Dominant", "purple"),
+        "Breakout": ("🚀 Breakout", "green"),
+        "Rising": ("↑ Rising", "green"),
+        "Stable": ("→ Stable", "amber"),
+        "Active": ("→ Stable", "amber"),
+        "Fading": ("↓ Fading", "red"),
+    }
+    return mapping.get(signal, ("→ Stable", "amber"))
+
+
+def health_badge(tier: str | None) -> str:
+    mapping = {
+        "Healthy": "green",
+        "Monitoring Required": "amber",
+        "Declining Health": "red",
+        "Critical Concerns": "red",
+        "Unknown": "neutral",
+        None: "neutral",
+    }
+    return mapping.get(tier, "neutral")
+
+
+def phase_badge(phase: str | None) -> str:
+    mapping = {
+        "Mature": "neutral",
+        "Consolidating": "purple",
+        "Early / Competing": "blue",
+        "Fragmenting": "amber",
+        "In Transition": "amber",
+    }
+    return mapping.get(phase, "neutral")
+
+
+def eco_colors(ecosystem: str | None) -> tuple[str, str]:
+    colors = {
+        "npm": ("#FEF9C3", "#D97706"),
+        "pypi": ("#EFF6FF", "#2563EB"),
+        "cargo": ("#FEF2F2", "#DC2626"),
+        "go": ("#F0FDF4", "#16A34A"),
+    }
+    return colors.get(str(ecosystem or "").lower(), ("#F4F4F5", "#71717A"))
+
+
+def score_tier_class(score: Any) -> str:
+    value = float(score or 0)
+    if value >= 75:
+        return "metric-positive"
+    if value >= 50:
+        return "metric-warning"
+    return "metric-negative"
+
+
+def format_days_ago(days: Any) -> str:
     if days is None:
         return "unknown"
-    if days < 30:
-        return f"{days} days ago"
-    if days < 365:
-        months = max(1, int(round(days / 30)))
+    try:
+        value = int(days)
+    except (TypeError, ValueError):
+        return "unknown"
+    if value <= 30:
+        return f"{value} days ago"
+    if value <= 365:
+        months = max(1, round(value / 30))
         return f"{months} month{'s' if months != 1 else ''} ago"
-    years = max(1, int(round(days / 365)))
+    years = max(1, round(value / 365))
     return f"{years} year{'s' if years != 1 else ''} ago"
 
 
-def health_tier_meta(tier: str) -> tuple[str, str]:
-    if tier == "Healthy":
-        return "✅", "health-tier-healthy"
-    if tier == "Monitoring Required":
-        return "⚠️", "health-tier-monitoring"
-    if tier == "Declining Health":
-        return "🔴", "health-tier-declining"
-    if tier == "Critical Concerns":
-        return "❌", "health-tier-critical"
-    return "❓", "health-tier-unknown"
+def health_metric_class(metric: str, value: Any, permissive: int | None = None) -> str:
+    if metric == "release":
+        if value is None:
+            return "metric-muted"
+        days = int(value)
+        if days <= 30:
+            return "metric-positive"
+        if days <= 90:
+            return "metric-default"
+        if days <= 180:
+            return "metric-warning"
+        return "metric-negative"
+    if metric == "advisories":
+        total = int(value or 0)
+        if total == 0:
+            return "metric-positive"
+        if total <= 2:
+            return "metric-warning"
+        return "metric-negative"
+    if metric == "deps":
+        if value is None:
+            return "metric-muted"
+        deps = int(value)
+        if deps <= 50:
+            return "metric-positive"
+        if deps <= 200:
+            return "metric-default"
+        if deps <= 500:
+            return "metric-warning"
+        return "metric-negative"
+    if metric == "license":
+        if value in (None, "", "unknown"):
+            return "metric-muted"
+        return "metric-positive" if int(permissive or 0) == 1 else "metric-warning"
+    return "metric-default"
+
+
+def initials(name: str | None) -> str:
+    parts = [p for p in str(name or "").replace("-", " ").split() if p]
+    if not parts:
+        return "UT"
+    if len(parts) == 1:
+        return parts[0][:2].upper()
+    return f"{parts[0][0]}{parts[1][0]}".upper()
+
+
+def signal_rank(label: str) -> int:
+    return {
+        "◆ Dominant": 5,
+        "🚀 Breakout": 4,
+        "↑ Rising": 3,
+        "→ Stable": 2,
+        "↓ Fading": 1,
+    }.get(label, 0)
+
+
+def latest_date_text() -> str:
+    snap = latest_snapshot_date()
+    return snap or "unknown"
+
+
+TOOLTIPS = {
+    "emergence_score": "Growth speed relative to size. High score means growing fast from a small base.",
+    "fragmentation_index": "How spread out adoption is across tools. Higher means teams are split across many options.",
+    "transitive_deps": "Total packages this tool pulls in when installed. More indirect dependencies means more inherited complexity.",
+    "confidence_tier": "Data quality signal. High means 50+ repos tracked. Low means directional only.",
+    "enterprise_adopters": "Repos owned by known engineering-rigorous organizations. This is a quality signal, not a guarantee.",
+    "bus_factor": "How many people could leave before the project stalls. Single-maintainer tools carry more continuity risk.",
+    "active_repos": "Repos using this tool that were updated in the last 30 days. A live usage signal, not just an install count.",
+}
 
 
 @app.context_processor
 def inject_helpers():
+    return dict(
+        signal_info=signal_info,
+        health_badge=health_badge,
+        phase_badge=phase_badge,
+        eco_colors=eco_colors,
+        latest_date_text=latest_date_text,
+        phase_explainer=phase_explainer,
+        initials=initials,
+        TOOLTIPS=TOOLTIPS,
+        latest_snapshot_date=get_latest_snapshot_date(),
+        freshness_status=get_snapshot_freshness_status(),
+    )
+
+
+def render_empty(page_title: str, active: str = "explore"):
+    return render_template("empty.html", page_title=page_title, active=active)
+
+
+def enrich_tool(tool: dict[str, Any]) -> dict[str, Any]:
+    item = dict(tool)
+    item["signal_label"], item["signal_class"] = signal_info(
+        item.get("emergence_score"), item.get("total_repos")
+    )
+    item["confidence_tooltip"] = item.get("confidence_tooltip") or confidence_badge_copy(
+        item.get("confidence_tier") or "Low",
+        int(item.get("sample_size") or item.get("total_repos") or 0),
+    )
+    item["repos_delta_display"] = format_delta_value(item.get("repos_delta_7d"))
+    item["downloads_display"] = format_downloads_value(item.get("weekly_downloads"))
+    item["eco_class"] = f"eco-{str(item.get('ecosystem') or 'other').lower()}"
+    item["tool_initials"] = initials(item.get("display_name"))
+    return item
+
+
+def enrich_health(tool: dict[str, Any], health: dict[str, Any] | None = None) -> dict[str, Any]:
+    info = dict(health or get_tool_health(tool["canonical_name"]) or {})
+    tier = info.get("health_tier") or "Unknown"
+    info["health_tier"] = tier
+    info["health_badge_class"] = health_badge(tier)
+    info["health_score_class"] = score_tier_class(info.get("health_score"))
+    info["last_release_text"] = format_days_ago(info.get("last_release_days"))
+    info["advisories_text"] = "None" if int(info.get("advisory_total") or 0) == 0 else str(
+        int(info.get("advisory_total") or 0)
+    )
+    info["transitive_text"] = (
+        f"{int(info['transitive_dep_count']):,} packages"
+        if info.get("transitive_dep_count") is not None
+        else "unknown"
+    )
+    license_value = info.get("license") or "unknown"
+    info["license_text"] = license_value
+    info["release_class"] = health_metric_class("release", info.get("last_release_days"))
+    info["advisory_class"] = health_metric_class("advisories", info.get("advisory_total"))
+    info["deps_class"] = health_metric_class("deps", info.get("transitive_dep_count"))
+    info["license_class"] = health_metric_class(
+        "license", license_value, info.get("license_is_permissive")
+    )
+    return info
+
+
+def build_category_cards() -> list[dict[str, Any]]:
+    cards: list[dict[str, Any]] = []
+    share_bars = get_category_share_bars()
+    for category in get_all_categories():
+        item = dict(category)
+        tools = sorted(
+            [enrich_tool(t) for t in get_category_tools(item["category"])],
+            key=lambda row: int(row.get("total_repos") or 0),
+            reverse=True,
+        )
+        total_repos = sum(int(t.get("total_repos") or 0) for t in tools)
+        top_a = tools[0] if tools else None
+        top_b = tools[1] if len(tools) > 1 else None
+        item["repo_count"] = total_repos
+        item["top_tool_1"] = top_a.get("display_name") if top_a else ""
+        item["top_tool_1_share"] = (
+            (int(top_a.get("total_repos") or 0) / max(1, total_repos)) * 100 if top_a else 0
+        )
+        item["top_tool_2"] = top_b.get("display_name") if top_b else ""
+        item["top_tool_2_share"] = (
+            (int(top_b.get("total_repos") or 0) / max(1, total_repos)) * 100 if top_b else 0
+        )
+        item["phase_badge_class"] = phase_badge(item.get("market_phase"))
+        item["tools"] = tools
+        item["fragmentation_pct"] = min(100, max(8, int(float(item.get("fragmentation_index") or 0) * 100)))
+        item["share_bar"] = share_bars.get(item["category"], [])
+        cards.append(item)
+    return cards
+
+
+def build_category_tool_cards(category: str) -> list[dict[str, Any]]:
+    cards: list[dict[str, Any]] = []
+    for tool in get_category_tools(category):
+        item = enrich_tool(tool)
+        health = enrich_health(item)
+        item["health"] = health
+        item["health_tier"] = health.get("health_tier")
+        item["health_badge_class"] = health.get("health_badge_class")
+        item["sort_repos"] = int(item.get("total_repos") or 0)
+        item["sort_growth"] = float(item.get("emergence_score") or 0)
+        item["sort_health"] = float(health.get("health_score") or 0)
+        cards.append(item)
+    cards.sort(key=lambda row: row["sort_repos"], reverse=True)
+    return cards
+
+
+def build_fragmentation_bars(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    total = sum(int(t.get("total_repos") or 0) for t in tools)
+    bars: list[dict[str, Any]] = []
+    for tool in tools[:6]:
+        share = (int(tool.get("total_repos") or 0) / max(1, total)) * 100
+        bars.append(
+            {
+                "name": tool["display_name"],
+                "share": share,
+                "label": f"{share:.0f}%",
+                "signal_label": tool["signal_label"],
+                "signal_class": tool["signal_class"],
+            }
+        )
+    return bars
+
+
+def build_tool_detail_payload(name: str) -> dict[str, Any] | None:
+    tool = get_tool_detail(name)
+    if not tool:
+        return None
+
+    item = enrich_tool(tool)
+    health = enrich_health(item, item.get("health"))
+    contributors = get_tool_contributors(name)[:5]
+    for contributor in contributors:
+        contributor["is_notable"] = is_notable_contributor(contributor)
+        contributor["initials"] = initials(contributor.get("name") or contributor.get("github_login"))
+    similar = [
+        enrich_tool(row)
+        for row in get_category_tools(item.get("category", ""))
+        if row["canonical_name"] != name
+    ][:4]
+
+    enterprise_orgs = []
+    seen_orgs: set[str] = set()
+    for repo in item.get("enterprise_repos", []):
+        org = repo.get("org")
+        if org and org not in seen_orgs:
+            seen_orgs.add(org)
+            enterprise_orgs.append(org)
+
+    stats = [
+        {
+            "label": "Repos using it",
+            "value": format_number_value(item.get("total_repos")),
+            "sub": "repos with 500+ stars",
+            "delta": format_delta_value(item.get("repos_delta_7d")),
+            "delta_class": "metric-positive" if int(item.get("repos_delta_7d") or 0) > 0 else (
+                "metric-negative" if int(item.get("repos_delta_7d") or 0) < 0 else "metric-muted"
+            ),
+        },
+        {
+            "label": "New (90 days)",
+            "value": format_number_value(item.get("new_repos_90d")),
+            "sub": "recently adopted",
+        },
+        {
+            "label": "Weekly downloads",
+            "value": format_downloads_value(item.get("weekly_downloads")),
+            "sub": item.get("downloads_source") or "not available",
+            "delta": format_delta_value(item.get("downloads_delta_7d")),
+            "delta_class": "metric-positive" if int(item.get("downloads_delta_7d") or 0) > 0 else (
+                "metric-negative" if int(item.get("downloads_delta_7d") or 0) < 0 else "metric-muted"
+            ),
+        },
+        {
+            "label": "Health score",
+            "value": f"{float(health.get('health_score') or 0):.0f}/100" if health else "—",
+            "sub": "dependency health",
+            "value_class": health.get("health_score_class", "metric-muted"),
+        },
+        {
+            "label": "Enterprise",
+            "value": f"{int(item.get('enterprise_repo_count') or 0)} orgs" if int(item.get("enterprise_repo_count") or 0) > 0 else "—",
+            "sub": "known orgs",
+        },
+    ]
+
+    trend_points = item.get("history") or []
+    version_spread = item.get("version_spread") or []
+    trend_chart = {
+        "x": [point["snapshot_date"] for point in trend_points],
+        "y": [int(point["total_repos"]) for point in trend_points],
+        "mode": "lines+markers" if len(trend_points) >= 4 else "markers",
+    }
+    version_chart = {
+        "labels": [row["version_normalized"] for row in version_spread],
+        "values": [int(row["cnt"]) for row in version_spread],
+    }
+
+    version_summary = None
+    top_version_pct = 0
+    if version_spread:
+        top_version = version_spread[0]
+        total_on_top = int(top_version.get("cnt") or 0)
+        total_version_repos = sum(int(row.get("cnt") or 0) for row in version_spread)
+        top_version_pct = round((total_on_top / max(1, total_version_repos)) * 100)
+        version_summary = (
+            f"{top_version_pct}% of repos are on the most common version "
+            f"({top_version.get('version_normalized', 'latest')})"
+        )
+
+    usage_panels = {
+        "integration": format_number_value(item.get("total_repos")),
+        "integration_sub": "GitHub dependency files",
+        "downloads": format_downloads_value(item.get("weekly_downloads")),
+        "downloads_sub": (
+            f"{item.get('downloads_source')} registry / week" if item.get("downloads_source") else "registry signal unavailable"
+        ),
+    }
+
     return {
-        "format_compact": format_compact,
-        "format_followers": format_followers,
-        "phase_short_label": phase_short_label,
-        "phase_explainer": phase_explainer,
+        "tool": item,
+        "health": health,
+        "contributors": contributors,
+        "similar": similar,
+        "enterprise_orgs": enterprise_orgs,
+        "pre_commercial_signal": get_pre_commercial_signal(
+            name, item.get("github_repo"), contributors=contributors
+        ),
+        "insight": generate_tool_insight(item),
+        "stats": stats,
+        "trend_chart": trend_chart,
+        "version_chart": version_chart,
+        "usage_panels": usage_panels,
+        "trend_reliable": int(item.get("is_trend_reliable") or 0) == 1,
+        "version_summary": version_summary,
+        "top_version_pct": top_version_pct,
     }
 
 
-@app.get("/")
-def home():
-    if not db_has_data():
-        return render_template("empty.html", page_title="Under The Hood")
+def compare_metric_row(
+    section: str,
+    label: str,
+    a_value: Any,
+    b_value: Any,
+    *,
+    higher_is_better: bool | None = None,
+) -> dict[str, Any]:
+    winner = ""
+    if higher_is_better is not None and a_value is not None and b_value is not None:
+        if a_value != b_value:
+            if higher_is_better:
+                winner = "a" if a_value > b_value else "b"
+            else:
+                winner = "a" if a_value < b_value else "b"
+    return {"section": section, "label": label, "winner": winner}
 
+
+@app.route("/")
+def explore():
+    if not db_has_data():
+        return render_empty("Explore", "explore")
+
+    categories = build_category_cards()
     stats = get_summary_stats()
-    movers = get_top_movers(6)
-    categories = get_all_categories()
-    radar_count = len(get_radar_tools())
-
-    category_runner_ups: dict[str, dict] = {}
-    for cat in categories:
-        tools = sorted(get_category_tools(cat["category"]), key=lambda x: x["total_repos"], reverse=True)
-        total_cat = max(1, sum(int(t["total_repos"]) for t in tools))
-        if len(tools) > 1:
-            ru = tools[1]
-            category_runner_ups[cat["category"]] = {
-                "name": ru["display_name"],
-                "share": (int(ru["total_repos"]) / total_cat) * 100,
-            }
-        else:
-            category_runner_ups[cat["category"]] = {"name": "N/A", "share": 0}
-
-    for row in movers:
-        signal, color, explainer = signal_label(float(row["emergence_score"]), int(row["total_repos"]))
-        icon_map = {
-            "Breakout": "🚀 Breakout",
-            "Rising": "↑ Rising",
-            "Fading": "↓ Fading",
-            "Stable": "→ Stable",
-            "Active": "→ Active",
-            "Dominant": "👑 Dominant",
+    emerging = [enrich_tool(tool) for tool in get_radar_tools()[:3]]
+    all_tools_flat = [
+        {
+            "canonical_name": tool["canonical_name"],
+            "display_name": tool["display_name"],
+            "category": tool["category"],
+            "ecosystem": tool["ecosystem"],
         }
-        row["signal"] = signal
-        row["signal_badge"] = icon_map.get(signal, signal)
-        row["signal_color"] = color
-        row["signal_explainer"] = explainer
-        row["activity_pct"] = (int(row["active_repos"]) / max(1, int(row["total_repos"]))) * 100
-        row["confidence_tier"] = row.get("confidence_tier") or "Low"
-        row["sample_size"] = int(row.get("sample_size") or row.get("total_repos") or 0)
-        row["confidence_tooltip"] = (
-            row.get("confidence_tooltip")
-            or confidence_badge_copy(row["confidence_tier"], row["sample_size"])
-        )
-        row["trend_reliable"] = int(row.get("is_trend_reliable") or 0) == 1
-        repos_delta = int(row.get("repos_delta_7d") or 0)
-        row["repos_delta_display"], row["repos_delta_class"] = format_delta(repos_delta)
-        row["show_repos_delta"] = not (repos_delta == 0 and not row["trend_reliable"])
-        row["low_confidence"] = row["sample_size"] < 15 or row["confidence_tier"] == "Low"
-
+        for tool in get_all_tools()
+    ]
     return render_template(
-        "home.html",
-        page_title="What's Happening Now",
-        stats=stats,
-        movers=movers,
+        "explore.html",
+        page_title="Explore",
+        active="explore",
         categories=categories,
-        category_runner_ups=category_runner_ups,
-        radar_count=radar_count,
+        stats=stats,
+        emerging=emerging,
+        all_tools_flat=all_tools_flat,
     )
 
 
-@app.get("/tool")
-def tool_detail():
+@app.route("/category")
+def category():
     if not db_has_data():
-        return render_template("empty.html", page_title="Tool Deep Dive")
+        return render_empty("Category View", "explore")
 
-    tools = get_all_tools()
-    if not tools:
-        return render_template("empty.html", page_title="Tool Deep Dive")
-
-    canonical = request.args.get("name")
-    if not canonical or canonical not in {t["canonical_name"] for t in tools}:
-        canonical = tools[0]["canonical_name"]
-
-    tool = get_tool_detail(canonical)
-    if not tool:
-        return redirect(url_for("home"))
-
-    contributors = get_tool_contributors(canonical)
-    for c in contributors:
-        c["is_notable"] = is_notable_contributor(c)
-    pre_commercial_signal = get_pre_commercial_signal(
-        canonical, tool.get("github_repo"), contributors=contributors
-    )
-
-    insight = generate_tool_insight(tool)
-    active_pct = (int(tool["active_repos"]) / max(1, int(tool["total_repos"]))) * 100
-    sample_size = int(tool.get("sample_size") or tool.get("total_repos") or 0)
-    confidence_tier = tool.get("confidence_tier") or "Low"
-    confidence_tooltip = tool.get("confidence_tooltip") or confidence_badge_copy(
-        confidence_tier, sample_size
-    )
-    trend_reliable = int(tool.get("is_trend_reliable") or 0) == 1
-    weekly_downloads = int(tool.get("weekly_downloads") or 0)
-    repos_delta_7d = int(tool.get("repos_delta_7d") or 0)
-    downloads_delta_7d = int(tool.get("downloads_delta_7d") or 0)
-    repos_delta_display, repos_delta_class = format_delta(repos_delta_7d)
-    downloads_delta_display, downloads_delta_class = format_delta(downloads_delta_7d)
-    show_repos_delta = not (repos_delta_7d == 0 and not trend_reliable)
-    show_downloads_delta = not (downloads_delta_7d == 0 and not trend_reliable)
-    downloads_source = tool.get("downloads_source")
-    usage_model = tool.get("usage_model") or "dependency_first"
-    has_downloads = bool(downloads_source)
-    download_history = get_download_history(canonical)
-
-    health = tool.get("health") or {}
-    has_health_data = bool(health)
-    deps_dev_found = int(health.get("deps_dev_found") or 0) if has_health_data else 0
-    osv_found = int(health.get("osv_found") or 0) if has_health_data else 0
-    show_health_section = has_health_data
-    health_data_available = deps_dev_found == 1 or osv_found == 1
-
-    health_score = float(health.get("health_score") or 0) if has_health_data else 0.0
-    health_tier = str(health.get("health_tier") or "Unknown") if has_health_data else "Unknown"
-    health_reason = str(health.get("health_tier_reason") or "") if has_health_data else ""
-    health_icon, health_tier_class = health_tier_meta(health_tier)
-
-    last_release_days = health.get("last_release_days") if has_health_data else None
-    if isinstance(last_release_days, (int, float)):
-        last_release_days_int = int(last_release_days)
-    else:
-        last_release_days_int = None
-    last_release_text = format_days_ago(last_release_days_int)
-    if last_release_days_int is None:
-        last_release_class = "health-muted"
-    elif last_release_days_int <= 30:
-        last_release_class = "health-good"
-    elif last_release_days_int <= 90:
-        last_release_class = "health-default"
-    elif last_release_days_int <= 180:
-        last_release_class = "health-warn"
-    else:
-        last_release_class = "health-bad"
-
-    advisory_total = int(health.get("advisory_total") or 0) if has_health_data else 0
-    advisory_critical = int(health.get("advisory_critical") or 0) if has_health_data else 0
-    advisory_high = int(health.get("advisory_high") or 0) if has_health_data else 0
-    if advisory_total == 0:
-        advisory_text = "None"
-        advisory_class = "health-good"
-    elif advisory_total <= 2:
-        advisory_text = f"{advisory_total} advisories ({advisory_critical}C {advisory_high}H)"
-        advisory_class = "health-warn"
-    else:
-        advisory_text = f"{advisory_total} advisories ({advisory_critical}C {advisory_high}H)"
-        advisory_class = "health-bad"
-
-    transitive_dep_count = health.get("transitive_dep_count") if has_health_data else None
-    if isinstance(transitive_dep_count, (int, float)):
-        transitive_dep_count_int = int(transitive_dep_count)
-    else:
-        transitive_dep_count_int = None
-    transitive_dep_text = (
-        f"{transitive_dep_count_int:,} packages" if transitive_dep_count_int is not None else "unknown"
-    )
-    if transitive_dep_count_int is None:
-        transitive_dep_class = "health-muted"
-    elif transitive_dep_count_int <= 50:
-        transitive_dep_class = "health-good"
-    elif transitive_dep_count_int <= 200:
-        transitive_dep_class = "health-default"
-    elif transitive_dep_count_int <= 500:
-        transitive_dep_class = "health-warn"
-    else:
-        transitive_dep_class = "health-bad"
-
-    license_value = str(health.get("license") or "") if has_health_data else ""
-    license_is_permissive = int(health.get("license_is_permissive") or 0) if has_health_data else 0
-    if not license_value:
-        license_text = "unknown"
-        license_class = "health-muted"
-    elif license_is_permissive == 1:
-        license_text = license_value
-        license_class = "health-good"
-    else:
-        license_text = f"{license_value} (non-permissive)"
-        license_class = "health-warn"
-
-    version_chart_html = ""
-    if go is not None and tool.get("version_spread"):
-        labels = [row["version_normalized"] for row in tool["version_spread"]]
-        values = [int(row["cnt"]) for row in tool["version_spread"]]
-        colors = [GREEN] + ["#52525B", "#4B5563", "#3F3F46", "#374151", "#27272A"]
-        fig = go.Figure(
-            go.Bar(
-                x=values,
-                y=labels,
-                orientation="h",
-                marker=dict(color=colors[: len(values)]),
-                text=[f"{v:,} repos" for v in values],
-                textposition="outside",
-                hovertemplate="%{y}: %{x:,} repos (projects on this version)<extra></extra>",
-            )
-        )
-        fig.update_layout(**plotly_defaults(), xaxis_title="Repos (projects on this version)", height=320)
-        fig.update_yaxes(autorange="reversed")
-        version_chart_html = fig.to_html(
-            full_html=False,
-            include_plotlyjs="cdn",
-            config={"displayModeBar": False, "responsive": True},
-        )
-
-    trend_chart_html = ""
-    history = tool.get("history") or []
-    if go is not None and len(history) > 1:
-        x = [h["snapshot_date"] for h in history]
-        y = [int(h["total_repos"]) for h in history]
-        fig2 = go.Figure(
-            go.Scatter(
-                x=x,
-                y=y,
-                mode="lines+markers",
-                line=dict(color=GREEN, width=2),
-                marker=dict(size=6, color=GREEN),
-                hovertemplate="%{x}: %{y:,} repos (projects using this tool)<extra></extra>",
-            )
-        )
-        fig2.update_layout(
-            **plotly_defaults(),
-            xaxis_title="Snapshot date (day this measurement was recorded)",
-            yaxis_title="Total repos (projects using this tool)",
-            height=320,
-        )
-        trend_chart_html = fig2.to_html(
-            full_html=False,
-            include_plotlyjs=False,
-            config={"displayModeBar": False, "responsive": True},
-        )
-
-    return render_template(
-        "tool_detail.html",
-        page_title="Tool Deep Dive",
-        tools=tools,
-        selected=canonical,
-        tool=tool,
-        contributors=contributors,
-        pre_commercial_signal=pre_commercial_signal,
-        insight=insight,
-        active_pct=active_pct,
-        confidence_tier=confidence_tier,
-        confidence_tooltip=confidence_tooltip,
-        sample_size=sample_size,
-        trend_reliable=trend_reliable,
-        weekly_downloads=weekly_downloads,
-        repos_delta_display=repos_delta_display,
-        repos_delta_class=repos_delta_class,
-        show_repos_delta=show_repos_delta,
-        downloads_delta_display=downloads_delta_display,
-        downloads_delta_class=downloads_delta_class,
-        show_downloads_delta=show_downloads_delta,
-        downloads_delta_compact=format_compact_delta(downloads_delta_7d),
-        downloads_source=downloads_source,
-        usage_model=usage_model,
-        has_downloads=has_downloads,
-        download_history=download_history,
-        show_health_section=show_health_section,
-        health_data_available=health_data_available,
-        health_score=health_score,
-        health_tier=health_tier,
-        health_reason=health_reason,
-        health_icon=health_icon,
-        health_tier_class=health_tier_class,
-        last_release_text=last_release_text,
-        last_release_class=last_release_class,
-        advisory_text=advisory_text,
-        advisory_class=advisory_class,
-        transitive_dep_text=transitive_dep_text,
-        transitive_dep_class=transitive_dep_class,
-        license_text=license_text,
-        license_class=license_class,
-        version_chart_html=version_chart_html,
-        trend_chart_html=trend_chart_html,
-    )
-
-
-@app.get("/category")
-def category_view():
-    if not db_has_data():
-        return render_template("empty.html", page_title="Category View")
-
-    categories = get_all_categories()
+    categories = build_category_cards()
     if not categories:
-        return render_template("empty.html", page_title="Category View")
+        return render_empty("Category View", "explore")
 
-    selected = request.args.get("name")
-    names = {c["category"] for c in categories}
+    selected = request.args.get("name", "").strip()
+    names = {category["category"] for category in categories}
     if not selected or selected not in names:
         selected = categories[0]["category"]
 
-    cat = next(c for c in categories if c["category"] == selected)
-    tools = sorted(get_category_tools(selected), key=lambda x: x["total_repos"], reverse=True)
-    total_repos = sum(int(t["total_repos"]) for t in tools)
-
-    bar_html = ""
-    if go is not None:
-        bar_fig = go.Figure(
-            go.Bar(
-                x=[int(t["total_repos"]) for t in tools],
-                y=[t["display_name"] for t in tools],
-                orientation="h",
-                marker=dict(
-                    color=[
-                        "#22C55E",
-                        "#3B82F6",
-                        "#F59E0B",
-                        "#A855F7",
-                        "#F43F5E",
-                        "#14B8A6",
-                        "#EAB308",
-                        "#60A5FA",
-                        "#FB7185",
-                        "#34D399",
-                    ][: len(tools)]
-                ),
-                text=[f"{int(t['total_repos']):,}" for t in tools],
-                textposition="outside",
-                hovertemplate="%{y}: %{x:,} repos (projects using this tool)<extra></extra>",
-            )
-        )
-        category_layout = plotly_defaults()
-        category_layout["margin"] = dict(l=120, r=20, t=30, b=20)
-        bar_fig.update_layout(
-            **category_layout,
-            height=420,
-            xaxis_title="Total repos (projects using each tool)",
-            yaxis_title="",
-        )
-        bar_fig.update_yaxes(autorange="reversed")
-        bar_html = bar_fig.to_html(
-            full_html=False,
-            include_plotlyjs="cdn",
-            config={"displayModeBar": False, "responsive": True},
-        )
-
-    rows = []
-    for t in tools:
-        signal, _, _ = signal_label(float(t["emergence_score"]), int(t["total_repos"]))
-        active_pct = (int(t["active_repos"]) / max(1, int(t["total_repos"]))) * 100
-        row_class = "row-default"
-        if signal in {"Breakout", "Rising"}:
-            row_class = "row-green"
-        elif signal == "Fading":
-            row_class = "row-red"
-        confidence_tier = t.get("confidence_tier") or "Low"
-        sample_size = int(t.get("sample_size") or t.get("total_repos") or 0)
-        confidence_tooltip = (
-            t.get("confidence_tooltip")
-            or confidence_badge_copy(confidence_tier, sample_size)
-        )
-        trend_reliable = int(t.get("is_trend_reliable") or 0) == 1
-        repos_delta = int(t.get("repos_delta_7d") or 0)
-        repos_delta_display, repos_delta_class = format_delta(repos_delta)
-        show_repos_delta = not (repos_delta == 0 and not trend_reliable)
-        rows.append(
-            {
-                "tool": t["display_name"],
-                "used_in_raw": int(t["total_repos"]),
-                "used_in": f"{int(t['total_repos']):,} (repos using this tool)",
-                "new_90d_raw": int(t["new_repos_90d"]),
-                "new_90d": f"{int(t['new_repos_90d']):,} (new adopters in last 90 days)",
-                "active_pct_raw": active_pct,
-                "active": f"{active_pct:.0f}% (share of using repos updated in last 30 days)",
-                "enterprise": int(t.get("enterprise_repo_count") or 0),
-                "signal": f"{signal} (momentum classification)",
-                "signal_text": signal,
-                "weekly_downloads": int(t.get("weekly_downloads") or 0),
-                "downloads_source": t.get("downloads_source"),
-                "confidence_tier": confidence_tier,
-                "confidence_tooltip": confidence_tooltip,
-                "sample_size": sample_size,
-                "repos_delta_7d": repos_delta,
-                "repos_delta_display": repos_delta_display,
-                "repos_delta_class": repos_delta_class,
-                "show_repos_delta": show_repos_delta,
-                "what": (t["description"][:57] + "...") if len(t["description"]) > 60 else t["description"],
-                "row_class": row_class,
-            }
-        )
-
+    cat_data = next(category for category in categories if category["category"] == selected)
+    tools = build_category_tool_cards(selected)
+    memo = generate_category_memo(selected)
+    fragmentation_bars = build_fragmentation_bars(tools)
     return render_template(
-        "category_view.html",
-        page_title="Category View",
+        "category.html",
+        page_title=selected,
+        active="explore",
         categories=categories,
         selected=selected,
-        cat=cat,
-        total_repos=total_repos,
-        bar_html=bar_html,
-        rows=rows,
+        tools=tools,
+        cat_data=cat_data,
+        memo=memo,
+        fragmentation_bars=fragmentation_bars,
     )
 
 
-@app.get("/memo")
-def memo():
+@app.route("/tool")
+def tool():
     if not db_has_data():
-        return render_template("empty.html", page_title="Briefs")
+        return render_empty("Tool", "explore")
 
-    categories = get_all_categories()
-    selected = request.args.get("category", "").strip()
-    memo_data = None
-    if selected:
-        memo_data = generate_category_memo(selected)
+    all_tools = [enrich_tool(tool) for tool in get_all_tools()]
+    if not all_tools:
+        return render_empty("Tool", "explore")
+
+    selected = request.args.get("name", "").strip()
+    valid_names = {tool["canonical_name"] for tool in all_tools}
+    if not selected or selected not in valid_names:
+        selected = all_tools[0]["canonical_name"]
+
+    payload = build_tool_detail_payload(selected)
+    if not payload:
+        return render_empty("Tool", "explore")
+
     return render_template(
-        "memo.html",
-        page_title="Briefs",
-        categories=categories,
-        selected=selected,
-        memo=memo_data,
+        "tool.html",
+        page_title=payload["tool"]["display_name"],
+        active="explore",
+        all_tools=all_tools,
+        tool=payload["tool"],
+        health=payload["health"],
+        contributors=payload["contributors"],
+        similar=payload["similar"],
+        enterprise_orgs=payload["enterprise_orgs"],
+        pre_commercial_signal=payload["pre_commercial_signal"],
+        insight=payload["insight"],
+        stats=payload["stats"],
+        trend_chart=payload["trend_chart"],
+        version_chart=payload["version_chart"],
+        usage_panels=payload["usage_panels"],
+        trend_reliable=payload["trend_reliable"],
+        version_summary=payload["version_summary"],
+        top_version_pct=payload["top_version_pct"],
+    )
+
+
+@app.route("/compare")
+def compare():
+    if not db_has_data():
+        return render_empty("Compare", "explore")
+
+    all_tools = [enrich_tool(tool) for tool in get_all_tools()]
+    selected_a = request.args.get("a", "").strip()
+    selected_b = request.args.get("b", "").strip()
+    valid = {tool["canonical_name"] for tool in all_tools}
+    tool_a = build_tool_detail_payload(selected_a) if selected_a in valid else None
+    tool_b = build_tool_detail_payload(selected_b) if selected_b in valid else None
+
+    comparison_rows: list[dict[str, Any]] = []
+    verdict = ""
+    if tool_a and tool_b and tool_a["tool"]["canonical_name"] != tool_b["tool"]["canonical_name"]:
+        a = tool_a["tool"]
+        b = tool_b["tool"]
+        health_a = tool_a["health"]
+        health_b = tool_b["health"]
+        a_signal = signal_info(a.get("emergence_score"), a.get("total_repos"))[0]
+        b_signal = signal_info(b.get("emergence_score"), b.get("total_repos"))[0]
+
+        rows = [
+            ("Overview", "Ecosystem", a.get("ecosystem"), b.get("ecosystem"), None),
+            ("Overview", "Category", a.get("category"), b.get("category"), None),
+            ("Overview", "Signal", a_signal, b_signal, "signal"),
+            ("Adoption", "Repos using it", int(a.get("total_repos") or 0), int(b.get("total_repos") or 0), True),
+            ("Adoption", "New adopters (90d)", int(a.get("new_repos_90d") or 0), int(b.get("new_repos_90d") or 0), True),
+            ("Adoption", "Week delta", int(a.get("repos_delta_7d") or 0), int(b.get("repos_delta_7d") or 0), True),
+            ("Adoption", "Weekly downloads", int(a.get("weekly_downloads") or 0), int(b.get("weekly_downloads") or 0), True),
+            ("Adoption", "Enterprise orgs", int(a.get("enterprise_repo_count") or 0), int(b.get("enterprise_repo_count") or 0), True),
+            ("Health", "Health score", float(health_a.get("health_score") or 0), float(health_b.get("health_score") or 0), True),
+            ("Health", "Health tier", health_a.get("health_tier") or "Unknown", health_b.get("health_tier") or "Unknown", None),
+            ("Health", "Last release", health_a.get("last_release_days"), health_b.get("last_release_days"), False),
+            ("Health", "Known advisories", int(health_a.get("advisory_total") or 0), int(health_b.get("advisory_total") or 0), False),
+            ("Health", "Transitive deps", health_a.get("transitive_dep_count"), health_b.get("transitive_dep_count"), False),
+            ("Health", "License", health_a.get("license") or "unknown", health_b.get("license") or "unknown", None),
+            ("Team", "Active builders", int(a.get("active_builder_count") or 0), int(b.get("active_builder_count") or 0), True),
+            (
+                "Team",
+                "Top contributor",
+                tool_a["contributors"][0]["github_login"] if tool_a["contributors"] else "—",
+                tool_b["contributors"][0]["github_login"] if tool_b["contributors"] else "—",
+                None,
+            ),
+            ("Confidence", "Data confidence", a.get("confidence_tier") or "Low", b.get("confidence_tier") or "Low", None),
+            (
+                "Confidence",
+                "Trend reliable",
+                "Yes" if int(a.get("is_trend_reliable") or 0) == 1 else "Building",
+                "Yes" if int(b.get("is_trend_reliable") or 0) == 1 else "Building",
+                None,
+            ),
+        ]
+
+        for section, label, a_value, b_value, comparator in rows:
+            row = compare_metric_row(
+                section,
+                label,
+                a_value if isinstance(a_value, (int, float)) else None,
+                b_value if isinstance(b_value, (int, float)) else None,
+                higher_is_better=comparator if isinstance(comparator, bool) else None,
+            )
+            if comparator == "signal":
+                a_rank = signal_rank(a_signal)
+                b_rank = signal_rank(b_signal)
+                row["winner"] = "a" if a_rank > b_rank else ("b" if b_rank > a_rank else "")
+
+            if label == "Week delta":
+                row["a_display"] = format_delta_value(a_value)
+                row["b_display"] = format_delta_value(b_value)
+            elif label == "Weekly downloads":
+                row["a_display"] = format_downloads_value(a_value)
+                row["b_display"] = format_downloads_value(b_value)
+            elif label == "Last release":
+                row["a_display"] = format_days_ago(a_value)
+                row["b_display"] = format_days_ago(b_value)
+            elif label == "Known advisories":
+                row["a_display"] = "None" if int(a_value or 0) == 0 else str(int(a_value or 0))
+                row["b_display"] = "None" if int(b_value or 0) == 0 else str(int(b_value or 0))
+            elif label == "Transitive deps":
+                row["a_display"] = f"{int(a_value):,}" if a_value is not None else "unknown"
+                row["b_display"] = f"{int(b_value):,}" if b_value is not None else "unknown"
+            elif label == "Health score":
+                row["a_display"] = f"{float(a_value or 0):.0f}"
+                row["b_display"] = f"{float(b_value or 0):.0f}"
+            else:
+                row["a_display"] = format_number_value(a_value) if isinstance(a_value, (int, float)) else a_value
+                row["b_display"] = format_number_value(b_value) if isinstance(b_value, (int, float)) else b_value
+            comparison_rows.append(row)
+
+        verdict = generate_comparison_verdict(a, b, health_a, health_b)
+
+    return render_template(
+        "compare.html",
+        page_title="Compare",
+        active="explore",
+        all_tools=all_tools,
+        selected_a=selected_a,
+        selected_b=selected_b,
+        tool_a=tool_a,
+        tool_b=tool_b,
+        comparison_rows=comparison_rows,
+        verdict=verdict,
+    )
+
+
+@app.route("/radar")
+def radar():
+    if not db_has_data():
+        return render_empty("Radar", "radar")
+
+    snapshot = get_radar_snapshot()
+    tools = [enrich_tool(tool) for tool in get_radar_tools()]
+    for tool in tools:
+        tool["activity_signal"] = format_activity_signal(tool.get("days_since_ecosystem_activity"))
+        tool["pre_commercial_signal"] = get_pre_commercial_signal(
+            tool["canonical_name"], tool.get("github_repo")
+        )
+        tool["top_builders"] = get_tool_top_contributors(tool["canonical_name"], limit=3)
+        for builder in tool["top_builders"]:
+            builder["is_notable"] = int(builder.get("followers") or 0) >= 500
+    return render_template(
+        "radar.html",
+        page_title="Radar",
+        active="radar",
+        tools=tools,
+        radar_snapshot=snapshot,
     )
 
 
 @app.route("/health")
 def health_page():
     if not db_has_data():
-        return render_template("empty.html", page_title="Tool Health Rankings")
+        return render_empty("Health", "health")
 
     category_filter = request.args.get("category", "").strip()
     tier_filter = request.args.get("tier", "").strip()
-
-    df = get_health_leaderboard(
-        category=category_filter or None,
-        tier=tier_filter or None,
-    )
-    base_df = get_health_leaderboard(category=category_filter or None, tier=None)
-    categories = get_all_categories()
+    df = get_health_leaderboard(category=category_filter or None, tier=tier_filter or None)
+    full_df = get_health_leaderboard(category=category_filter or None, tier=None)
 
     tools = df.to_dict("records") if not df.empty else []
-    for row in tools:
-        tier = str(row.get("health_tier") or "Unknown")
-        icon, tier_class = health_tier_meta(tier)
-        row["health_icon"] = icon
-        row["health_tier_class"] = tier_class
-        row["health_score"] = float(row.get("health_score") or 0)
-        row["health_score_pct"] = max(0, min(100, int(round(row["health_score"]))))
-
-        signal, _, _ = signal_label(float(row.get("emergence_score") or 0), int(row.get("total_repos") or 0))
-        icon_map = {
-            "Breakout": "🚀 Breakout",
-            "Rising": "↑ Rising",
-            "Fading": "↓ Fading",
-            "Stable": "→ Stable",
-            "Active": "→ Active",
-            "Dominant": "👑 Dominant",
-        }
-        row["momentum_label"] = icon_map.get(signal, signal)
-
-        advisories_total = int(row.get("advisory_total") or 0)
-        advisories_critical = int(row.get("advisory_critical") or 0)
-        advisories_high = int(row.get("advisory_high") or 0)
-        if advisories_total == 0:
-            row["advisories_text"] = "None"
-            row["advisories_class"] = "health-good"
-        else:
-            row["advisories_text"] = f"{advisories_critical}C {advisories_high}H"
-            row["advisories_class"] = "health-warn" if advisories_total <= 2 else "health-bad"
-
-        last_release_days = row.get("last_release_days")
-        if isinstance(last_release_days, float) and math.isnan(last_release_days):
-            row["last_release_text"] = "unknown"
-        elif isinstance(last_release_days, (int, float)):
-            row["last_release_text"] = format_days_ago(int(last_release_days))
-        else:
-            row["last_release_text"] = "unknown"
-
-        enterprise_count = int(row.get("enterprise_repo_count") or 0)
-        row["enterprise_text"] = f"{enterprise_count} orgs" if enterprise_count > 0 else "—"
-
+    for tool in tools:
+        tool["signal_label"], tool["signal_class"] = signal_info(
+            tool.get("emergence_score"), tool.get("total_repos")
+        )
+        tool["health_badge_class"] = health_badge(tool.get("health_tier"))
+        tool["last_release_text"] = format_days_ago(tool.get("last_release_days"))
+        tool["advisories_text"] = "None" if int(tool.get("advisory_total") or 0) == 0 else (
+            f"{int(tool.get('advisory_critical') or 0)}C {int(tool.get('advisory_total') or 0)} total"
+        )
+        tool["advisory_class"] = health_metric_class("advisories", tool.get("advisory_total"))
+        tool["enterprise_text"] = (
+            f"{int(tool.get('enterprise_repo_count') or 0)} orgs"
+            if int(tool.get("enterprise_repo_count") or 0) > 0
+            else "—"
+        )
+        tier = str(tool.get("health_tier") or "Unknown")
         if tier == "Healthy":
-            row["health_row_class"] = "health-row-healthy"
+            tool["row_tint"] = "row-tint-green"
         elif tier == "Monitoring Required":
-            row["health_row_class"] = "health-row-monitoring"
-        elif tier in {"Declining Health", "Critical Concerns"}:
-            row["health_row_class"] = "health-row-critical"
+            tool["row_tint"] = "row-tint-amber"
         else:
-            row["health_row_class"] = "row-default"
+            tool["row_tint"] = "row-tint-red"
 
-    if base_df.empty:
-        healthy_count = 0
-        monitoring_count = 0
-        declining_count = 0
-        critical_count = 0
-        known_count = 0
-    else:
-        healthy_count = int((base_df["health_tier"] == "Healthy").sum())
-        monitoring_count = int((base_df["health_tier"] == "Monitoring Required").sum())
-        declining_count = int((base_df["health_tier"] == "Declining Health").sum())
-        critical_count = int((base_df["health_tier"] == "Critical Concerns").sum())
-        known_count = int(len(base_df))
-
-    total_tools_in_scope = len(get_all_tools(category=category_filter or None))
-    unknown_count = max(0, total_tools_in_scope - known_count)
-    critical_or_unknown = critical_count + unknown_count
+    healthy_count = int((full_df["health_tier"] == "Healthy").sum()) if not full_df.empty else 0
+    monitoring_count = int((full_df["health_tier"] == "Monitoring Required").sum()) if not full_df.empty else 0
+    declining_count = int((full_df["health_tier"] == "Declining Health").sum()) if not full_df.empty else 0
+    critical_count = int((full_df["health_tier"] == "Critical Concerns").sum()) if not full_df.empty else 0
+    total_known = len(full_df) if not full_df.empty else 0
+    total_tools = len(get_all_tools(category=category_filter or None))
+    scatter_data = [
+        {
+            "display_name": tool["display_name"],
+            "category": tool["category"],
+            "emergence_score": float(tool.get("emergence_score") or 0),
+            "health_score": float(tool.get("health_score") or 0),
+            "health_tier": tool.get("health_tier") or "Unknown",
+            "total_repos": int(tool.get("total_repos") or 0),
+        }
+        for tool in tools
+    ]
 
     return render_template(
         "health.html",
-        page_title="Tool Health Rankings",
+        page_title="Health",
+        active="health",
         tools=tools,
-        categories=categories,
+        categories=build_category_cards(),
         selected_category=category_filter,
         selected_tier=tier_filter,
         total_count=len(tools),
         healthy_count=healthy_count,
         monitoring_count=monitoring_count,
         declining_count=declining_count,
-        critical_or_unknown_count=critical_or_unknown,
+        critical_or_unknown_count=max(0, total_tools - total_known) + critical_count,
+        scatter_data=scatter_data,
     )
 
 
-@app.get("/ops")
-def ops():
-    data = get_ops_data()
-    return render_template("ops.html", page_title="Ops", data=data)
-
-
-@app.get("/radar")
-def radar():
+@app.route("/memo")
+@app.route("/memo/<category_slug>")
+def memo(category_slug: str | None = None):
     if not db_has_data():
-        return render_template("empty.html", page_title="The Radar")
+        return render_empty("Briefs", "memo")
 
-    radar_snapshot = get_radar_snapshot()
-    tools = radar_snapshot["tools"]
-    for tool in tools:
-        tool["confidence_tooltip"] = tool.get("confidence_tooltip") or confidence_badge_copy(
-            tool.get("confidence_tier") or "Low",
-            int(tool.get("sample_size") or tool.get("total_repos") or 0),
-        )
-        trend_reliable = int(tool.get("is_trend_reliable") or 0) == 1
-        repos_delta = int(tool.get("repos_delta_7d") or 0)
-        tool["repos_delta_display"], tool["repos_delta_class"] = format_delta(repos_delta)
-        tool["show_repos_delta"] = not (repos_delta == 0 and not trend_reliable)
-
-        contributors = get_tool_top_contributors(tool["canonical_name"], limit=3)
-        top_builders = []
-        for c in contributors:
-            top_builders.append(
-                {
-                    "github_login": c.get("github_login"),
-                    "name": c.get("name") or "",
-                    "contributions": int(c.get("contributions") or 0),
-                    "followers": int(c.get("followers") or 0),
-                    "company": c.get("company") or "",
-                    "bio": c.get("bio") or "",
-                    "html_url": c.get("html_url") or "",
-                    "is_notable": int(c.get("followers") or 0) >= 500,
-                }
-            )
-        tool["top_builders"] = top_builders
-        tool["has_contributor_data"] = len(top_builders) > 0
-
-        days_since = tool.get("days_since_ecosystem_activity")
-        days_since_int = int(days_since) if days_since is not None else None
-        tool["activity_signal"] = format_activity_signal(days_since_int)
-        tool["days_since_ecosystem_activity"] = days_since_int
-        tool["activity_class"] = "activity-muted"
-        tool["low_activity_note"] = ""
-        if days_since_int is not None:
-            if days_since_int <= 7:
-                tool["activity_class"] = "activity-green"
-            elif days_since_int <= 30:
-                tool["activity_class"] = "activity-amber"
-            elif days_since_int <= 90:
-                tool["activity_class"] = "activity-muted"
-            else:
-                tool["activity_class"] = "activity-red"
-                tool["low_activity_note"] = "(low recent activity)"
-
-        builder_count = int(tool.get("active_builder_count") or 0)
-        if builder_count == 0 and not tool["has_contributor_data"]:
-            tool["builder_note"] = "Contributor data not yet collected — run scripts/06_fetch_contributors.py"
-            tool["builder_note_class"] = "builder-note-muted"
-        elif builder_count == 1:
-            tool["builder_note"] = "Single maintainer — bus factor risk"
-            tool["builder_note_class"] = "builder-note-amber"
-        elif 2 <= builder_count <= 5:
-            tool["builder_note"] = "Small focused team"
-            tool["builder_note_class"] = "builder-note-muted"
-        else:
-            tool["builder_note"] = f"Active community ({builder_count} contributors)"
-            tool["builder_note_class"] = "builder-note-green"
-
-        tool["pre_commercial_signal"] = get_pre_commercial_signal(
-            tool["canonical_name"], tool.get("github_repo"), contributors=contributors
-        )
-        ent = int(tool.get("enterprise_repo_count") or 0)
-        if ent >= 1:
-            tool["signal_border"] = "signal-green"
-        elif tool["pre_commercial_signal"]:
-            tool["signal_border"] = "signal-amber"
-        else:
-            tool["signal_border"] = "signal-default"
-
+    categories = build_category_cards()
+    if category_slug:
+        slug_map = {
+            cat["category"].lower().replace("/", "-").replace(" ", "-"): cat["category"]
+            for cat in categories
+        }
+        if category_slug not in slug_map:
+            return redirect(url_for("memo"))
+        selected = slug_map[category_slug]
+    else:
+        selected = request.args.get("category", "").strip()
+    memo_data = generate_category_memo(selected) if selected else None
     return render_template(
-        "radar.html",
-        page_title="The Radar",
-        tools=tools,
-        radar_count=len(tools),
-        radar_max_repos=400,
-        radar_min_growth_pct=int(round(float(radar_snapshot["growth_threshold"]) * 100)),
-        radar_target_growth_pct=int(round(float(radar_snapshot["target_growth_threshold"]) * 100)),
-        radar_fallback_growth_pct=int(round(float(radar_snapshot["fallback_growth_threshold"]) * 100)),
+        "memo.html",
+        page_title="Briefs",
+        active="memo",
+        categories=categories,
+        selected=selected,
+        memo=memo_data,
+        category_slug=category_slug,
     )
 
 
-@app.get("/learn")
+@app.route("/learn")
 def learn():
     if not db_has_data():
-        return render_template("empty.html", page_title="How to Read This")
-    return render_template("learn.html", page_title="How to Read This")
+        return render_empty("About", "learn")
+    return render_template("learn.html", page_title="About", active="learn")
 
 
-@app.get("/healthz")
+@app.route("/ops")
+def ops():
+    return render_template(
+        "ops.html",
+        page_title="Ops",
+        active="memo",
+        data=get_ops_data(),
+    )
+
+
+@app.route("/org/<org_name>")
+def org_detail(org_name: str):
+    tools = [enrich_tool(tool) for tool in get_org_tools(org_name)]
+    return render_template(
+        "org.html",
+        page_title=f"{org_name} on GitHub",
+        active="explore",
+        org_name=org_name,
+        tools=tools,
+    )
+
+
+@app.route("/healthz")
 def healthz():
-    return {"ok": True}
+    return {"status": "ok", "timestamp": time.time()}, 200
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8000, debug=True)
+    app.run(host="0.0.0.0", port=5000, debug=True)
