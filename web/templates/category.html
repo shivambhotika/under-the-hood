@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block content %}
+<section>
+  <h1>Category View</h1>
+  <p class="subtitle">Compare tools within the same problem area.</p>
+
+  <form method="get" action="{{ url_for('category_view') }}" class="selector-form">
+    <label for="name">Choose a category</label>
+    <select id="name" name="name" onchange="this.form.submit()">
+      {% for category in categories %}
+      <option value="{{ category.category }}" {% if category.category == selected %}selected{% endif %}>{{ category.category }}</option>
+      {% endfor %}
+    </select>
+  </form>
+</section>
+
+<section class="cards three">
+  <article class="card">
+    <div class="label">Category</div>
+    <div class="value">{{ cat_data.category }}</div>
+  </article>
+  <article class="card">
+    <div class="label">Phase</div>
+    <div class="value">{{ cat_data.market_phase or "Unknown" }}</div>
+  </article>
+  <article class="card">
+    <div class="label">Fragmentation</div>
+    <div class="value">{{ "%.2f"|format(cat_data.fragmentation_index or 0) }}</div>
+  </article>
+</section>
+
+{% if memo %}
+<section class="insight-box">
+  <div class="label">Category memo</div>
+  <p>{{ memo.verdict }}</p>
+</section>
+{% endif %}
+
+<section>
+  <h2>Tools in this category</h2>
+  <div class="cards three">
+    {% for item in tools %}
+    <article class="card">
+      <div class="label">{{ item.signal_label }}</div>
+      <h3>{{ item.display_name }}</h3>
+      <ul class="metric-list">
+        <li>Repos: <strong>{{ "{:,}".format(item.total_repos or 0) }}</strong></li>
+        <li>New in 90d: <strong>{{ "{:,}".format(item.new_repos_90d or 0) }}</strong></li>
+        <li>Health: <strong>{{ item.health_tier or "Unknown" }}</strong></li>
+      </ul>
+      <a class="memo-inline-link" href="{{ url_for('tool_detail', name=item.canonical_name) }}">Open tool →</a>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

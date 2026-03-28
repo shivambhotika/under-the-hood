@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block content %}
+<section>
+  <h1>Tool Deep Dive</h1>
+  <p class="subtitle">Inspect adoption, health, and notable builders for a tool.</p>
+
+  <form method="get" action="{{ url_for('tool_detail') }}" class="selector-form">
+    <label for="name">Choose a tool</label>
+    <select id="name" name="name" onchange="this.form.submit()">
+      {% for item in all_tools %}
+      <option value="{{ item.canonical_name }}" {% if item.canonical_name == tool.canonical_name %}selected{% endif %}>{{ item.display_name }}</option>
+      {% endfor %}
+    </select>
+  </form>
+</section>
+
+<section class="cards three">
+  <article class="card">
+    <div class="label">Tool</div>
+    <div class="value">{{ tool.display_name }}</div>
+    <div class="sub">{{ tool.category }} · {{ tool.ecosystem }}</div>
+  </article>
+  <article class="card">
+    <div class="label">Repos using it</div>
+    <div class="value">{{ "{:,}".format(tool.total_repos or 0) }}</div>
+    <div class="sub">{{ stats[0].delta if stats and stats[0].delta else "Current install base" }}</div>
+  </article>
+  <article class="card">
+    <div class="label">Health</div>
+    <div class="value">{{ health.health_tier or "Unknown" }}</div>
+    <div class="sub">{{ "%.0f"|format(health.health_score or 0) }}/100</div>
+  </article>
+</section>
+
+<section class="insight-box">
+  <div class="label">What this means</div>
+  <p>{{ insight }}</p>
+</section>
+
+<section>
+  <h2>Top contributors</h2>
+  <div class="cards three">
+    {% for contributor in contributors %}
+    <article class="card">
+      <h3>@{{ contributor.github_login }}</h3>
+      <p>{{ contributor.name or contributor.company or "Independent" }}</p>
+      <ul class="metric-list">
+        <li>Commits: <strong>{{ "{:,}".format(contributor.contributions or 0) }}</strong></li>
+        <li>Followers: <strong>{{ "{:,}".format(contributor.followers or 0) }}</strong></li>
+      </ul>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+
+{% if similar %}
+<section>
+  <h2>Similar tools</h2>
+  <div class="cards three">
+    {% for item in similar %}
+    <article class="card">
+      <div class="label">{{ item.category }}</div>
+      <h3>{{ item.display_name }}</h3>
+      <p>{{ item.signal_label }}</p>
+      <a class="memo-inline-link" href="{{ url_for('tool_detail', name=item.canonical_name) }}">Open tool →</a>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+{% endblock %}

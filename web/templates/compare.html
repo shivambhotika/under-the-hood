@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block content %}
+<section>
+  <h1>Compare Tools</h1>
+  <p class="subtitle">Select two tools to compare adoption and health side by side.</p>
+
+  <form method="get" action="{{ url_for('compare') }}" class="selector-form">
+    <label for="a">Tool A</label>
+    <select id="a" name="a">
+      {% for item in all_tools %}
+      <option value="{{ item.canonical_name }}" {% if item.canonical_name == selected_a %}selected{% endif %}>{{ item.display_name }}</option>
+      {% endfor %}
+    </select>
+    <label for="b">Tool B</label>
+    <select id="b" name="b">
+      {% for item in all_tools %}
+      <option value="{{ item.canonical_name }}" {% if item.canonical_name == selected_b %}selected{% endif %}>{{ item.display_name }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit">Compare</button>
+  </form>
+</section>
+
+{% if verdict %}
+<section class="insight-box">
+  <div class="label">Verdict</div>
+  <p>{{ verdict }}</p>
+</section>
+{% endif %}
+
+{% if comparison_rows %}
+<section>
+  <h2>Comparison table</h2>
+  <div class="table-wrap desktop-table">
+    <table>
+      <thead>
+        <tr>
+          <th>Section</th>
+          <th>Metric</th>
+          <th>{{ tool_a.tool.display_name if tool_a else "Tool A" }}</th>
+          <th>{{ tool_b.tool.display_name if tool_b else "Tool B" }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in comparison_rows %}
+        <tr>
+          <td>{{ row.section }}</td>
+          <td>{{ row.label }}</td>
+          <td>{{ row.a_display }}</td>
+          <td>{{ row.b_display }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}
