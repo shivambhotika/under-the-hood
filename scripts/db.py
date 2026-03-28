@@ -28,6 +28,8 @@ CREATE TABLE IF NOT EXISTS tools (
     usage_model TEXT DEFAULT 'dependency_first',
     npm_package TEXT,
     pypi_package TEXT,
+    website_domain TEXT,
+    is_official INTEGER DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -107,6 +109,19 @@ CREATE TABLE IF NOT EXISTS categories (
     top_tool_share_pct REAL DEFAULT 0,
     insight_text TEXT,
     computed_at TEXT
+);
+
+-- Maps tracked OSS tools to the proprietary products they can replace
+CREATE TABLE IF NOT EXISTS tool_alternatives (
+    canonical_name TEXT NOT NULL,
+    proprietary_name TEXT NOT NULL,
+    proprietary_slug TEXT NOT NULL,
+    proprietary_description TEXT,
+    proprietary_website TEXT,
+    proprietary_category TEXT,
+    alternative_type TEXT DEFAULT 'full',
+    PRIMARY KEY (canonical_name, proprietary_slug),
+    FOREIGN KEY (canonical_name) REFERENCES tools(canonical_name)
 );
 
 
@@ -356,6 +371,33 @@ def run_migrations(conn: sqlite3.Connection) -> None:
         "tools",
         "pypi_package",
         "pypi_package TEXT",
+    )
+    _ensure_column(
+        conn,
+        "tools",
+        "website_domain",
+        "website_domain TEXT",
+    )
+    _ensure_column(
+        conn,
+        "tools",
+        "is_official",
+        "is_official INTEGER DEFAULT 0",
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tool_alternatives (
+            canonical_name TEXT NOT NULL,
+            proprietary_name TEXT NOT NULL,
+            proprietary_slug TEXT NOT NULL,
+            proprietary_description TEXT,
+            proprietary_website TEXT,
+            proprietary_category TEXT,
+            alternative_type TEXT DEFAULT 'full',
+            PRIMARY KEY (canonical_name, proprietary_slug),
+            FOREIGN KEY (canonical_name) REFERENCES tools(canonical_name)
+        )
+        """
     )
     conn.execute(
         """

@@ -26,6 +26,7 @@ CATEGORY_DESCRIPTIONS = {
     "AI Observability": "Tools for monitoring, debugging, and evaluating LLM applications and AI agents.",
     "Vector DB": "Databases optimized for storing and searching high-dimensional vector embeddings.",
     "Data Pipeline": "Tools for orchestrating, scheduling, and monitoring data workflows.",
+    "MCP Servers": "Model Context Protocol servers that connect AI tools to external systems and developer workflows.",
 }
 
 

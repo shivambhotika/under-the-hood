@@ -8,6 +8,54 @@
   </p>
 </section>
 
+<section class="mode-grid">
+  <a href="{{ url_for('find') }}" class="mode-card">
+    <div class="mode-card-icon">⌕</div>
+    <div class="mode-card-body">
+      <h2 class="mode-card-title">Find Tools</h2>
+      <p class="mode-card-desc">Search the tracked universe by name, category, and ecosystem.</p>
+      <div class="mode-card-example">"Show me fast-growing Python tooling"</div>
+    </div>
+    <span class="mode-card-arrow">→</span>
+  </a>
+  <a href="{{ url_for('market') }}" class="mode-card">
+    <div class="mode-card-icon">📈</div>
+    <div class="mode-card-body">
+      <h2 class="mode-card-title">Markets</h2>
+      <p class="mode-card-desc">See which categories are mature, fragmenting, or still open.</p>
+      <div class="mode-card-example">"Which markets still have room for a winner?"</div>
+    </div>
+    <span class="mode-card-arrow">→</span>
+  </a>
+  <a href="{{ url_for('alternatives_index') }}" class="mode-card mode-card--alternatives">
+    <div class="mode-card-icon">🔄</div>
+    <div class="mode-card-body">
+      <h2 class="mode-card-title">OSS Alternatives</h2>
+      <p class="mode-card-desc">Find what serious teams chose instead of proprietary tools, ranked by real adoption.</p>
+      <div class="mode-card-example">"What's the open-source alternative to Datadog?"</div>
+    </div>
+    <span class="mode-card-arrow">→</span>
+  </a>
+  <a href="{{ url_for('mcp_directory') }}" class="mode-card mode-card--mcp">
+    <div class="mode-card-icon">🤖</div>
+    <div class="mode-card-body">
+      <h2 class="mode-card-title">MCP Directory</h2>
+      <p class="mode-card-desc">Model Context Protocol servers, ranked by adoption and production health.</p>
+      <div class="mode-card-example">"Which MCP servers are actually used and maintained?"</div>
+    </div>
+    <span class="mode-card-arrow">→</span>
+  </a>
+  <a href="{{ url_for('audit') }}" class="mode-card">
+    <div class="mode-card-icon">🧪</div>
+    <div class="mode-card-body">
+      <h2 class="mode-card-title">Audit</h2>
+      <p class="mode-card-desc">Full production-readiness audit: adoption, health, companions, and replacement context.</p>
+      <div class="mode-card-example">"Should I trust Ruff in production?"</div>
+    </div>
+    <span class="mode-card-arrow">→</span>
+  </a>
+</section>
+
 <section class="cards three">
   <article class="card">
     <div class="label">Tools tracked</div>

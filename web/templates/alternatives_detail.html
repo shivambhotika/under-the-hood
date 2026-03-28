@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% from "macros.html" import breadcrumbs, tool_logo %}
+{% block page_title %}Open Source Alternatives to {{ prop.proprietary_name }} — Under The Hood{% endblock %}
+{% block og_title %}{{ tools | length }} Open Source Alternatives to {{ prop.proprietary_name }}{% endblock %}
+{% block og_desc %}Validated by real adoption data. See which OSS tools serious teams chose instead of {{ prop.proprietary_name }}.{% endblock %}
+{% block content %}
+{{ breadcrumbs([
+  {'label': 'Home', 'href': url_for('home')},
+  {'label': 'Alternatives', 'href': url_for('alternatives_index')},
+  {'label': 'vs ' + prop.proprietary_name, 'href': '#'}
+]) }}
+
+<div class="alt-detail-header">
+  <div class="prop-hero">
+    {% if prop.proprietary_website %}
+    <img src="https://img.logo.dev/{{ prop.proprietary_website }}?token={{ LOGO_DEV_TOKEN }}&size=96&format=png"
+         width="48" height="48" class="tool-logo"
+         onerror="this.style.display='none'"
+         alt="{{ prop.proprietary_name }}"
+         loading="lazy">
+    {% endif %}
+    <div>
+      <div class="prop-hero-label">Open source alternatives to</div>
+      <h1 class="prop-hero-name">{{ prop.proprietary_name }}</h1>
+      <p class="prop-hero-desc">{{ prop.proprietary_description }}</p>
+    </div>
+  </div>
+  <div class="alt-validation-note">
+    <span class="pill">Data-validated</span>
+    Each alternative below is ranked by real adoption across tracked repositories.
+  </div>
+</div>
+
+{% if tools and tools[0].total_repos > 0 %}
+{% set leader = tools[0] %}
+<div class="alt-leader-callout">
+  <div class="alc-label">Most adopted alternative</div>
+  <div class="alc-body">
+    {{ tool_logo(leader, 36) }}
+    <div class="alc-text">
+      <strong>{{ leader.display_name }}</strong> is used in
+      <strong>{{ leader.total_repos | format_number }} repositories</strong>
+      {% if leader.enterprise_repo_count > 0 %}
+      including {{ leader.enterprise_repo_count }} enterprise organization{{ 's' if leader.enterprise_repo_count != 1 }}.
+      {% endif %}
+    </div>
+    <a href="{{ url_for('audit', tool=leader.canonical_name) }}" class="memo-inline-link">Full audit →</a>
+  </div>
+</div>
+{% endif %}
+
+<div class="alt-tools-list">
+  {% for tool in tools %}
+  {% set sig_label, sig_color = signal_info(tool.emergence_score, tool.total_repos) %}
+  <div class="alt-tool-card card">
+    <div class="atc-header">
+      {{ tool_logo(tool, 40) }}
+      <div class="atc-identity">
+        <div class="atc-name">{{ tool.display_name }}</div>
+        <div class="atc-desc">{{ tool.description }}</div>
+        <div class="atc-badges">
+          <span class="pill">{{ tool.ecosystem }}</span>
+          <span class="pill">{{ tool.alternative_type }}</span>
+        </div>
+      </div>
+      <span class="pill">{{ sig_label }}</span>
+    </div>
+    <div class="atc-proof">
+      <div class="proof-label">Why teams chose this</div>
+      <div class="proof-stats">
+        <div><div class="ps-num">{{ tool.total_repos | format_number }}</div><div class="ps-label">repos</div></div>
+        <div><div class="ps-num">{{ tool.enterprise_repo_count }}</div><div class="ps-label">enterprise orgs</div></div>
+        <div><div class="ps-num">{{ tool.health_score | round | int }}</div><div class="ps-label">health score</div></div>
+        <div><div class="ps-num">{{ tool.last_release_days or '—' }}</div><div class="ps-label">days since release</div></div>
+      </div>
+    </div>
+    <div class="atc-actions">
+      <a href="{{ url_for('audit', tool=tool.canonical_name) }}" class="memo-inline-link">Full audit →</a>
+      <a href="{{ url_for('tool_detail', name=tool.canonical_name) }}" class="memo-inline-link">Adoption data →</a>
+      {% if tool.github_repo %}
+      <a href="https://github.com/{{ tool.github_repo }}" class="memo-inline-link" target="_blank">GitHub ↗</a>
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

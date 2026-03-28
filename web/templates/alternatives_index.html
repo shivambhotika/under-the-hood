@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block page_title %}Open Source Alternatives — Under The Hood{% endblock %}
+{% block og_title %}Open Source Alternatives — Backed by real adoption data{% endblock %}
+{% block og_desc %}Find OSS alternatives to proprietary tools, validated by real adoption data.{% endblock %}
+{% block content %}
+<div class="alt-index-header">
+  <h1 class="page-title">Open Source Alternatives</h1>
+  <p class="page-subtitle">
+    Every alternative here is validated by real adoption data. We scan
+    {{ summary_stats.total_repos | format_number if summary_stats else '9,000+' }} repositories
+    and show what serious teams actually chose.
+  </p>
+  <div class="search-wrap" style="max-width: 480px; margin: 24px 0 0;">
+    <input type="text" id="altSearch" class="search-input"
+           placeholder="Search proprietary tools... (e.g. Datadog, Pinecone)"
+           autocomplete="off">
+    <span class="search-icon">⌕</span>
+  </div>
+</div>
+
+{% for category, cat_products in by_category.items() %}
+<div class="alt-category-section" data-category="{{ category }}">
+  <h2 class="alt-category-title">{{ category }}</h2>
+  <div class="alt-proprietary-grid">
+    {% for product in cat_products %}
+    <a href="{{ url_for('alternatives_detail', proprietary_slug=product.proprietary_slug) }}"
+       class="proprietary-card card"
+       data-name="{{ product.proprietary_name | lower }}">
+      <div class="prop-identity">
+        {% if product.proprietary_website %}
+        <img src="https://img.logo.dev/{{ product.proprietary_website }}?token={{ LOGO_DEV_TOKEN }}&size=48&format=png"
+             width="32" height="32" class="tool-logo"
+             onerror="this.style.display='none'"
+             alt="{{ product.proprietary_name }}"
+             loading="lazy">
+        {% endif %}
+        <div>
+          <div class="prop-name">{{ product.proprietary_name }}</div>
+          <div class="prop-desc">{{ product.proprietary_description }}</div>
+        </div>
+      </div>
+      <div class="prop-meta">
+        <span class="pill">{{ product.alternative_count }} OSS alternative{{ 's' if product.alternative_count != 1 }}</span>
+        <span class="prop-arrow">→</span>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+</div>
+{% endfor %}
+
+<script>
+document.getElementById('altSearch').addEventListener('input', function() {
+  const q = this.value.toLowerCase();
+  document.querySelectorAll('.proprietary-card').forEach(card => {
+    card.style.display = card.dataset.name.includes(q) ? '' : 'none';
+  });
+  document.querySelectorAll('.alt-category-section').forEach(section => {
+    const visible = [...section.querySelectorAll('.proprietary-card')].some(c => c.style.display !== 'none');
+    section.style.display = visible ? '' : 'none';
+  });
+});
+</script>
+{% endblock %}

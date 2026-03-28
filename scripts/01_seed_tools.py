@@ -145,6 +145,87 @@ SEED_TOOLS = [
     ("temporal", "Temporal", "pypi", "Data Pipeline", "Workflow orchestration platform for reliability-critical systems", "temporalio/temporal"),
 ]
 
+MCP_TOOLS = [
+    ("@modelcontextprotocol/server-github", "MCP GitHub", "npm", "MCP Servers", "Official MCP server for GitHub — repos, issues, PRs", "modelcontextprotocol/servers"),
+    ("@modelcontextprotocol/server-filesystem", "MCP Filesystem", "npm", "MCP Servers", "Official MCP server for local filesystem access", "modelcontextprotocol/servers"),
+    ("@modelcontextprotocol/server-postgres", "MCP PostgreSQL", "npm", "MCP Servers", "Official MCP server for PostgreSQL database access", "modelcontextprotocol/servers"),
+    ("@modelcontextprotocol/server-slack", "MCP Slack", "npm", "MCP Servers", "Official MCP server for Slack workspace access", "modelcontextprotocol/servers"),
+    ("@modelcontextprotocol/server-google-maps", "MCP Google Maps", "npm", "MCP Servers", "Official MCP server for Google Maps and location data", "modelcontextprotocol/servers"),
+    ("@modelcontextprotocol/server-brave-search", "MCP Brave Search", "npm", "MCP Servers", "Official MCP server for Brave web search", "modelcontextprotocol/servers"),
+    ("@modelcontextprotocol/server-sqlite", "MCP SQLite", "npm", "MCP Servers", "Official MCP server for SQLite database", "modelcontextprotocol/servers"),
+    ("@modelcontextprotocol/server-puppeteer", "MCP Puppeteer", "npm", "MCP Servers", "Official MCP server for browser automation via Puppeteer", "modelcontextprotocol/servers"),
+    ("@upstash/context7-mcp", "Context7", "npm", "MCP Servers", "Up-to-date docs for any Cursor prompt via Upstash", "upstash/context7-mcp"),
+    ("@exa-labs/exa-mcp-server", "Exa Search MCP", "npm", "MCP Servers", "AI-powered web search via Exa", "exa-labs/exa-mcp-server"),
+    ("@supabase/mcp-server-supabase", "Supabase MCP", "npm", "MCP Servers", "MCP server for Supabase database and auth", "supabase/mcp-server-supabase"),
+    ("@browserbasehq/mcp-server-browserbase", "Browserbase MCP", "npm", "MCP Servers", "Cloud browser automation via Browserbase", "browserbase/mcp-server-browserbase"),
+    ("mcp-server-firecrawl", "Firecrawl MCP", "npm", "MCP Servers", "Web scraping and crawling for AI agents", "mendableai/firecrawl"),
+    ("@microsoft/playwright-mcp", "Playwright MCP", "npm", "MCP Servers", "Browser automation via Playwright", "microsoft/playwright-mcp"),
+    ("mcp-server-git", "MCP Git", "pypi", "MCP Servers", "MCP server for Git repository operations", "modelcontextprotocol/servers"),
+    ("mcp", "MCP SDK Python", "pypi", "MCP Servers", "Official Python SDK for building MCP servers", "modelcontextprotocol/python-sdk"),
+]
+
+ALTERNATIVE_MAPPINGS = [
+    ("sentry-sdk", "Datadog", "datadog", "Cloud monitoring and security platform", "datadog.com", "Observability", "partial"),
+    ("sentry-sdk", "Sentry", "sentry", "Application monitoring and error tracking (commercial tier)", "sentry.io", "Observability", "full"),
+    ("langfuse", "LangSmith", "langsmith", "LangChain's hosted LLM observability platform", "smith.langchain.com", "AI Observability", "full"),
+    ("langfuse", "Datadog", "datadog", "Cloud monitoring and security platform", "datadog.com", "Observability", "partial"),
+    ("logfire", "Datadog", "datadog", "Cloud monitoring and security platform", "datadog.com", "Observability", "partial"),
+    ("logfire", "LangSmith", "langsmith", "LangChain's hosted LLM observability platform", "smith.langchain.com", "AI Observability", "partial"),
+    ("apache-airflow", "Prefect Cloud", "prefect-cloud", "Managed workflow orchestration platform", "prefect.io", "Data Pipeline", "adjacent"),
+    ("prefect", "Prefect Cloud", "prefect-cloud", "Managed workflow orchestration platform", "prefect.io", "Data Pipeline", "full"),
+    ("dagster", "Prefect Cloud", "prefect-cloud", "Managed workflow orchestration platform", "prefect.io", "Data Pipeline", "adjacent"),
+    ("dagster", "Databricks", "databricks", "Unified data analytics platform", "databricks.com", "Data Pipeline", "partial"),
+    ("apache-airflow", "Databricks", "databricks", "Unified data analytics platform", "databricks.com", "Data Pipeline", "partial"),
+    ("prisma", "PlanetScale", "planetscale", "Serverless MySQL platform", "planetscale.com", "Database", "adjacent"),
+    ("drizzle-orm", "PlanetScale", "planetscale", "Serverless MySQL platform", "planetscale.com", "Database", "adjacent"),
+    ("sqlalchemy", "Django ORM", "django-orm", "Django's built-in ORM (not standalone)", "djangoproject.com", "ORM", "adjacent"),
+    ("fastapi", "AWS Lambda", "aws-lambda", "Serverless function execution", "aws.amazon.com", "API Framework", "partial"),
+    ("hono", "Cloudflare Workers", "cloudflare-workers", "Edge serverless execution", "cloudflare.com", "API Framework", "partial"),
+    ("pytest", "Pytest Enterprise", "pytest-enterprise", "Enterprise test management", "pytest.org", "Testing", "full"),
+    ("playwright", "BrowserStack", "browserstack", "Cloud cross-browser testing platform", "browserstack.com", "Testing", "partial"),
+    ("playwright", "Sauce Labs", "sauce-labs", "Cloud testing platform", "saucelabs.com", "Testing", "partial"),
+    ("ruff", "SonarQube", "sonarqube", "Code quality and security platform", "sonarqube.org", "Linting", "partial"),
+    ("eslint", "SonarQube", "sonarqube", "Code quality and security platform", "sonarqube.org", "Linting", "partial"),
+    ("langchain", "OpenAI Assistants API", "openai-assistants", "OpenAI's hosted agent framework", "platform.openai.com", "AI/ML", "partial"),
+    ("pydantic-ai", "OpenAI Assistants API", "openai-assistants", "OpenAI's hosted agent framework", "platform.openai.com", "AI/ML", "partial"),
+    ("crewai", "AutoGen Studio", "autogen-studio", "Microsoft's multi-agent UI", "microsoft.com", "AI/ML", "partial"),
+    ("llama-index", "Pinecone Assistant", "pinecone-assistant", "Pinecone's hosted RAG service", "pinecone.io", "AI/ML", "partial"),
+    ("transformers", "OpenAI API", "openai-api", "OpenAI's proprietary model API", "api.openai.com", "AI/ML", "partial"),
+    ("litellm", "OpenAI API", "openai-api", "OpenAI's proprietary model API", "api.openai.com", "AI/ML", "full"),
+    ("chromadb", "Pinecone", "pinecone", "Managed vector database service", "pinecone.io", "Vector DB", "full"),
+    ("qdrant-client", "Pinecone", "pinecone", "Managed vector database service", "pinecone.io", "Vector DB", "full"),
+    ("weaviate-client", "Pinecone", "pinecone", "Managed vector database service", "pinecone.io", "Vector DB", "full"),
+    ("pgvector", "Pinecone", "pinecone", "Managed vector database service", "pinecone.io", "Vector DB", "partial"),
+    ("zustand", "Redux", "redux", "Predictable state container (commercial support)", "redux.js.org", "State Management", "full"),
+    ("jotai", "Redux", "redux", "Predictable state container (commercial support)", "redux.js.org", "State Management", "full"),
+    ("vite", "webpack", "webpack", "Module bundler", "webpack.js.org", "Bundler", "full"),
+    ("esbuild", "webpack", "webpack", "Module bundler", "webpack.js.org", "Bundler", "full"),
+    ("uv", "pip", "pip", "Python's default package installer", "pip.pypa.io", "Package Manager", "full"),
+    ("poetry", "pip", "pip", "Python's default package installer", "pip.pypa.io", "Package Manager", "full"),
+    ("pnpm", "npm", "npm", "Node.js default package manager", "npmjs.com", "Package Manager", "full"),
+]
+
+OFFICIAL_MCP_ORGS = {"modelcontextprotocol", "microsoft", "google", "anthropic"}
+
+WEBSITE_DOMAINS = {
+    "@modelcontextprotocol/server-github": "modelcontextprotocol.io",
+    "@modelcontextprotocol/server-filesystem": "modelcontextprotocol.io",
+    "@modelcontextprotocol/server-postgres": "modelcontextprotocol.io",
+    "@modelcontextprotocol/server-slack": "modelcontextprotocol.io",
+    "@modelcontextprotocol/server-google-maps": "modelcontextprotocol.io",
+    "@modelcontextprotocol/server-brave-search": "modelcontextprotocol.io",
+    "@modelcontextprotocol/server-sqlite": "modelcontextprotocol.io",
+    "@modelcontextprotocol/server-puppeteer": "modelcontextprotocol.io",
+    "@upstash/context7-mcp": "upstash.com",
+    "@exa-labs/exa-mcp-server": "exa.ai",
+    "@supabase/mcp-server-supabase": "supabase.com",
+    "@browserbasehq/mcp-server-browserbase": "browserbase.com",
+    "mcp-server-firecrawl": "firecrawl.dev",
+    "@microsoft/playwright-mcp": "playwright.dev",
+    "mcp-server-git": "modelcontextprotocol.io",
+    "mcp": "modelcontextprotocol.io",
+}
+
 ALIASES = {
     # npm aliases
     "@tanstack/react-query": "react-query",
@@ -295,7 +376,7 @@ def main() -> None:
                 canonical_name, display_name, ecosystem, category, description, github_repo
             ) VALUES (?, ?, ?, ?, ?, ?)
             """,
-            SEED_TOOLS,
+            SEED_TOOLS + MCP_TOOLS,
         )
         conn.executemany(
             "INSERT OR IGNORE INTO tool_aliases(alias, canonical_name) VALUES (?, ?)",
@@ -329,6 +410,39 @@ def main() -> None:
                 "UPDATE tools SET npm_package = ?, pypi_package = ? WHERE canonical_name = ?",
                 (npm_pkg, pypi_pkg, canonical),
             )
+
+        for canonical, domain in WEBSITE_DOMAINS.items():
+            conn.execute(
+                "UPDATE tools SET website_domain = ? WHERE canonical_name = ?",
+                (domain, canonical),
+            )
+
+        for canonical, _, _, _, _, github_repo in MCP_TOOLS:
+            org = github_repo.split("/")[0] if github_repo else ""
+            is_official = 1 if org in OFFICIAL_MCP_ORGS else 0
+            conn.execute(
+                "UPDATE tools SET is_official = ? WHERE canonical_name = ?",
+                (is_official, canonical),
+            )
+
+        seeded_alternatives = 0
+        for mapping in ALTERNATIVE_MAPPINGS:
+            canonical, prop_name, prop_slug, prop_desc, prop_website, prop_cat, alt_type = mapping
+            cur = conn.execute(
+                """
+                INSERT OR IGNORE INTO tool_alternatives (
+                    canonical_name,
+                    proprietary_name,
+                    proprietary_slug,
+                    proprietary_description,
+                    proprietary_website,
+                    proprietary_category,
+                    alternative_type
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (canonical, prop_name, prop_slug, prop_desc, prop_website, prop_cat, alt_type),
+            )
+            seeded_alternatives += int(cur.rowcount or 0)
         conn.commit()
 
         category_rows = conn.execute(
@@ -337,13 +451,16 @@ def main() -> None:
         if args.verify:
             print_package_verification_report(conn)
 
-    category_counter = Counter(t[3] for t in SEED_TOOLS)
-    print(f"Seeded {len(SEED_TOOLS)} tools across {len(category_counter)} categories")
+    all_seed_tools = SEED_TOOLS + MCP_TOOLS
+    category_counter = Counter(t[3] for t in all_seed_tools)
+    print(f"Seeded {len(all_seed_tools)} tools across {len(category_counter)} categories")
     print("\nCategory | Count")
     print("---------|------")
     for row in category_rows:
         print(f"{row['category']} | {row['cnt']}")
     print("  -> Usage models updated")
+    print(f"  -> Seeded {len(MCP_TOOLS)} MCP server tools")
+    print(f"  -> Seeded {seeded_alternatives} alternative mappings")
 
 
 if __name__ == "__main__":

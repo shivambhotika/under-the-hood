@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<section>
+  <h1>Find Tools</h1>
+  <p class="subtitle">Search across the tracked OSS universe by name, category, or ecosystem.</p>
+  <form method="get" action="{{ url_for('find') }}" class="selector-form">
+    <label for="q">Search</label>
+    <input id="q" name="q" type="text" value="{{ query }}" placeholder="e.g. pytest, MCP, vector db">
+  </form>
+</section>
+
+<section class="cards three">
+  {% for tool in tools %}
+  <article class="card">
+    <div class="label">{{ tool.category }} · {{ tool.ecosystem }}</div>
+    <h3>{{ tool.display_name }}</h3>
+    <p>{{ tool.description or "No description yet." }}</p>
+    <ul class="metric-list">
+      <li>Repos: <strong>{{ "{:,}".format(tool.total_repos or 0) }}</strong></li>
+      <li>Signal: <strong>{{ tool.signal_label }}</strong></li>
+    </ul>
+    <div class="button-row">
+      <a class="memo-inline-link" href="{{ url_for('audit', tool=tool.canonical_name) }}">Audit →</a>
+      <a class="memo-inline-link" href="{{ url_for('tool_detail', name=tool.canonical_name) }}">Data →</a>
+    </div>
+  </article>
+  {% endfor %}
+</section>
+{% endblock %}

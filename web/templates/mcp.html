@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block page_title %}MCP Server Directory — Under The Hood{% endblock %}
+{% block og_title %}MCP Server Directory — Adoption-ranked, health-scored{% endblock %}
+{% block og_desc %}The MCP server directory with real adoption and health scoring.{% endblock %}
+{% block content %}
+<div class="mcp-header">
+  <div class="mcp-title-row">
+    <h1 class="page-title">MCP Server Directory</h1>
+    <span class="pill">New</span>
+  </div>
+  <p class="page-subtitle">
+    Model Context Protocol servers ranked by real adoption in developer configs and scored for production safety.
+  </p>
+  <div class="mcp-explainer card">
+    <div class="mcp-exp-title">What is MCP?</div>
+    <div class="mcp-exp-text">
+      MCP lets AI tools like Cursor and Claude Desktop connect to GitHub, databases, browsers, and internal systems.
+      We track which servers appear in real developer configs and which ones look safe to run in production workflows.
+    </div>
+  </div>
+</div>
+
+<div class="mcp-filters">
+  <button class="filter-btn active" onclick="filterMCP('all', this)">All ({{ tools | length }})</button>
+  <button class="filter-btn" onclick="filterMCP('official', this)">🌟 Official</button>
+  <button class="filter-btn" onclick="filterMCP('healthy', this)">✅ Healthy</button>
+  <button class="filter-btn" onclick="filterMCP('emerging', this)">🔭 Emerging</button>
+</div>
+
+<div class="mcp-grid">
+  {% for server in tools %}
+  <div class="mcp-card card"
+       data-official="{{ server.is_official }}"
+       data-health="{{ server.health_tier or 'Unknown' }}"
+       data-emergence="{{ server.emergence_score }}">
+    <div class="mcp-card-header">
+      <div class="mcp-card-identity">
+        {% if server.is_official %}<span class="official-badge">🌟</span>{% endif %}
+        <div class="mcp-card-name">{{ server.display_name }}</div>
+      </div>
+      <span class="pill">{{ server.health_tier or 'Unscored' }}</span>
+    </div>
+    <p class="mcp-card-desc">{{ server.description }}</p>
+    <div class="mcp-package-name">
+      <span class="mpn-label">Install:</span>
+      <code class="mpn-code">{{ server.canonical_name }}</code>
+      <button class="mpn-copy" onclick="copyToClipboard('{{ server.canonical_name }}', this)">⎘</button>
+    </div>
+    <div class="mcp-stats">
+      <div><div class="ms-num">{{ server.total_repos }}</div><div class="ms-label">configs</div></div>
+      <div><div class="ms-num">{{ server.enterprise_repo_count }}</div><div class="ms-label">enterprise</div></div>
+      <div><div class="ms-num">{{ server.health_score | round | int }}</div><div class="ms-label">health</div></div>
+    </div>
+    {% if server.advisory_total and server.advisory_total > 0 %}
+    <div class="mcp-security-warning">⚠️ {{ server.advisory_total }} known advisories</div>
+    {% elif server.health_score and server.health_score >= 75 %}
+    <div class="mcp-security-ok">✅ No known vulnerabilities detected</div>
+    {% endif %}
+    <div class="mcp-card-footer">
+      {% if server.github_repo %}
+      <a href="https://github.com/{{ server.github_repo }}" class="memo-inline-link" target="_blank">GitHub ↗</a>
+      {% endif %}
+      <a href="{{ url_for('audit', tool=server.canonical_name) }}" class="memo-inline-link">Audit →</a>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="mcp-bottom-note">
+  <h3>Why health scoring matters for MCP servers</h3>
+  <p>MCP servers execute code inside AI workflows and often have filesystem or network access. Health is not optional.</p>
+</div>
+
+<script>
+function filterMCP(filter, btn) {
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('.mcp-card').forEach(card => {
+    let show = true;
+    if (filter === 'official') show = card.dataset.official === '1';
+    if (filter === 'healthy') show = ['Healthy', 'Monitoring Required'].includes(card.dataset.health);
+    if (filter === 'emerging') show = parseFloat(card.dataset.emergence) > 15;
+    card.style.display = show ? '' : 'none';
+  });
+}
+function copyToClipboard(text, btn) {
+  navigator.clipboard.writeText(text).then(() => {
+    btn.textContent = '✓';
+    setTimeout(() => btn.textContent = '⎘', 1500);
+  });
+}
+</script>
+{% endblock %}

@@ -286,6 +286,7 @@ def get_all_tools(ecosystem: str | None = None, category: str | None = None) -> 
         query = """
             SELECT
                 t.canonical_name, t.display_name, t.ecosystem, t.category, t.description, t.github_repo,
+                t.website_domain, COALESCE(t.is_official, 0) AS is_official,
                 COALESCE(t.usage_model, 'dependency_first') AS usage_model,
                 COALESCE(s.total_repos, 0) AS total_repos,
                 COALESCE(s.active_repos, 0) AS active_repos,
@@ -366,7 +367,8 @@ def get_tool_detail(canonical_name: str) -> dict[str, Any] | None:
             """
             SELECT
                 t.canonical_name, t.display_name, t.ecosystem, t.category,
-                t.description, t.github_repo, COALESCE(t.usage_model, 'dependency_first') AS usage_model,
+                t.description, t.github_repo, t.website_domain, COALESCE(t.is_official, 0) AS is_official,
+                COALESCE(t.usage_model, 'dependency_first') AS usage_model,
                 COALESCE(s.total_repos, 0) AS total_repos,
                 COALESCE(s.active_repos, 0) AS active_repos,
                 COALESCE(s.new_repos_90d, 0) AS new_repos_90d,
@@ -461,6 +463,162 @@ def get_tool_detail(canonical_name: str) -> dict[str, Any] | None:
     out["history"] = _row_dicts(history)
     out["health"] = dict(health) if health else {}
     return out
+
+
+@cache_with_ttl(3600)
+def get_all_proprietary_products() -> list[dict[str, Any]]:
+    with _conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT proprietary_name, proprietary_slug, proprietary_description,
+                   proprietary_website, proprietary_category,
+                   COUNT(DISTINCT canonical_name) AS alternative_count
+            FROM tool_alternatives
+            GROUP BY proprietary_slug
+            ORDER BY alternative_count DESC, proprietary_name ASC
+            """
+        ).fetchall()
+    return _row_dicts(rows)
+
+
+@cache_with_ttl(3600)
+def get_alternatives_for_proprietary(proprietary_slug: str) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+    with _conn() as conn:
+        today = conn.execute("SELECT MAX(snapshot_date) AS d FROM tool_snapshots").fetchone()["d"]
+        prop_info = conn.execute(
+            """
+            SELECT proprietary_name, proprietary_description, proprietary_website,
+                   proprietary_category, proprietary_slug
+            FROM tool_alternatives
+            WHERE proprietary_slug = ?
+            LIMIT 1
+            """,
+            (proprietary_slug,),
+        ).fetchone()
+        if not prop_info:
+            return None, []
+
+        rows = conn.execute(
+            """
+            SELECT t.canonical_name, t.display_name, t.ecosystem, t.category,
+                   t.description, t.github_repo, t.website_domain,
+                   a.alternative_type,
+                   COALESCE(s.total_repos, 0) AS total_repos,
+                   COALESCE(s.emergence_score, 0) AS emergence_score,
+                   COALESCE(s.new_repos_90d, 0) AS new_repos_90d,
+                   COALESCE(s.enterprise_repo_count, 0) AS enterprise_repo_count,
+                   COALESCE(s.weekly_downloads, 0) AS weekly_downloads,
+                   COALESCE(s.confidence_tier, 'Low') AS confidence_tier,
+                   COALESCE(s.repos_delta_7d, 0) AS repos_delta_7d,
+                   COALESCE(h.health_score, 0) AS health_score,
+                   COALESCE(h.health_tier, 'Unknown') AS health_tier,
+                   h.health_tier_reason,
+                   h.last_release_days,
+                   COALESCE(h.advisory_total, 0) AS advisory_total,
+                   COALESCE(h.license_is_permissive, 0) AS license_is_permissive
+            FROM tool_alternatives a
+            JOIN tools t ON a.canonical_name = t.canonical_name
+            LEFT JOIN tool_snapshots s
+              ON t.canonical_name = s.canonical_name AND s.snapshot_date = ?
+            LEFT JOIN tool_health h ON t.canonical_name = h.canonical_name
+            WHERE a.proprietary_slug = ?
+            ORDER BY COALESCE(s.total_repos, 0) DESC, t.display_name ASC
+            """,
+            (today, proprietary_slug),
+        ).fetchall()
+    return dict(prop_info), _row_dicts(rows)
+
+
+@cache_with_ttl(3600)
+def get_alternatives_for_tool(canonical_name: str) -> list[dict[str, Any]]:
+    with _conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT proprietary_name, proprietary_slug, proprietary_description,
+                   proprietary_website, alternative_type
+            FROM tool_alternatives
+            WHERE canonical_name = ?
+            ORDER BY proprietary_name ASC
+            """,
+            (canonical_name,),
+        ).fetchall()
+    return _row_dicts(rows)
+
+
+@cache_with_ttl(1800)
+def get_mcp_tools() -> list[dict[str, Any]]:
+    with _conn() as conn:
+        today = conn.execute("SELECT MAX(snapshot_date) AS d FROM tool_snapshots").fetchone()["d"]
+        rows = conn.execute(
+            """
+            SELECT t.canonical_name, t.display_name, t.ecosystem, t.description,
+                   t.github_repo, t.website_domain, COALESCE(t.is_official, 0) AS is_official,
+                   COALESCE(s.total_repos, 0) AS total_repos,
+                   COALESCE(s.emergence_score, 0) AS emergence_score,
+                   COALESCE(s.new_repos_90d, 0) AS new_repos_90d,
+                   COALESCE(s.confidence_tier, 'Low') AS confidence_tier,
+                   COALESCE(s.enterprise_repo_count, 0) AS enterprise_repo_count,
+                   COALESCE(h.health_score, 0) AS health_score,
+                   COALESCE(h.health_tier, 'Unknown') AS health_tier,
+                   COALESCE(h.advisory_total, 0) AS advisory_total,
+                   h.last_release_days,
+                   h.license
+            FROM tools t
+            LEFT JOIN tool_snapshots s
+              ON t.canonical_name = s.canonical_name AND s.snapshot_date = ?
+            LEFT JOIN tool_health h ON t.canonical_name = h.canonical_name
+            WHERE t.category = 'MCP Servers'
+            ORDER BY COALESCE(t.is_official, 0) DESC, COALESCE(s.total_repos, 0) DESC, t.display_name ASC
+            """,
+            (today,),
+        ).fetchall()
+    return _row_dicts(rows)
+
+
+@cache_with_ttl(3600)
+def get_stack_companions(canonical_name: str, limit: int = 6) -> list[dict[str, Any]]:
+    with _conn() as conn:
+        today = conn.execute("SELECT MAX(snapshot_date) AS d FROM tool_snapshots").fetchone()["d"]
+        rows = conn.execute(
+            """
+            SELECT
+                CASE WHEN ci.tool_a = ? THEN ci.tool_b ELSE ci.tool_a END AS companion,
+                ci.shared_repo_count,
+                t.display_name, t.category, t.ecosystem, t.description,
+                COALESCE(s.total_repos, 0) AS total_repos
+            FROM co_installs ci
+            JOIN tools t
+              ON t.canonical_name = CASE WHEN ci.tool_a = ? THEN ci.tool_b ELSE ci.tool_a END
+            LEFT JOIN tool_snapshots s
+              ON t.canonical_name = s.canonical_name AND s.snapshot_date = ?
+            WHERE (ci.tool_a = ? OR ci.tool_b = ?)
+              AND ci.shared_repo_count >= 3
+            ORDER BY ci.shared_repo_count DESC, t.display_name ASC
+            LIMIT ?
+            """,
+            (canonical_name, canonical_name, today, canonical_name, canonical_name, limit),
+        ).fetchall()
+    return _row_dicts(rows)
+
+
+@cache_with_ttl(3600)
+def get_migration_evidence(from_tool: str, to_tool: str) -> dict[str, Any]:
+    with _conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT a.repo_full_name, a.stars, b.found_at AS new_tool_added
+            FROM tool_repos a
+            JOIN tool_repos b ON a.repo_full_name = b.repo_full_name
+            WHERE a.canonical_name = ?
+              AND b.canonical_name = ?
+              AND a.stars > 0
+            ORDER BY datetime(b.found_at) DESC
+            LIMIT 10
+            """,
+            (from_tool, to_tool),
+        ).fetchall()
+    repo_rows = _row_dicts(rows)
+    return {"count": len(repo_rows), "repos": repo_rows[:5]}
 
 
 @ttl_cache(900)

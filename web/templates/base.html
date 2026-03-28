@@ -3,7 +3,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>{{ page_title }} · Under The Hood</title>
+  <title>{% block page_title %}{{ page_title }} · Under The Hood{% endblock %}</title>
+  <meta property="og:title" content="{% block og_title %}{{ page_title }} · Under The Hood{% endblock %}">
+  <meta property="og:description" content="{% block og_desc %}Open-source tool intelligence backed by real adoption data.{% endblock %}">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -15,18 +17,23 @@
       <div class="brand">🔧 Under The Hood</div>
       <div class="brand-sub">OSS Tool Intelligence</div>
       <nav>
-        <a href="{{ url_for('home') }}" class="nav-link {% if request.path == '/' %}active{% endif %}">🏠 What's Happening Now</a>
-        <a href="{{ url_for('radar') }}" class="nav-link {% if request.path == '/radar' %}active{% endif %}">🔭 The Radar</a>
-        <a href="{{ url_for('tool_detail') }}" class="nav-link {% if request.path == '/tool' %}active{% endif %}">🔍 Tool Deep Dive</a>
-        <a href="{{ url_for('category_view') }}" class="nav-link {% if request.path == '/category' %}active{% endif %}">📦 Category View</a>
-        <a href="{{ url_for('health_page') }}" class="nav-link {% if request.path == '/health' %}active{% endif %}">🏥 Health</a>
-        <a href="{{ url_for('memo') }}" class="nav-link {% if request.path == '/memo' %}active{% endif %}">📋 Briefs</a>
-        <a href="{{ url_for('learn') }}" class="nav-link {% if request.path == '/learn' %}active{% endif %}">📖 How to Read This</a>
+        <a href="{{ url_for('home') }}" class="nav-link {% if active in ['home', 'explore'] or request.path == '/' %}active{% endif %}">Home</a>
+        <a href="{{ url_for('find') }}" class="nav-link {% if active == 'find' %}active{% endif %}">Find</a>
+        <a href="{{ url_for('market') }}" class="nav-link {% if active == 'market' %}active{% endif %}">Markets</a>
+        <a href="{{ url_for('alternatives_index') }}" class="nav-link {% if active == 'alternatives' %}active{% endif %}">Alternatives</a>
+        <a href="{{ url_for('mcp_directory') }}" class="nav-link {% if active == 'mcp' %}active{% endif %}">MCP <span class="nav-badge-new">new</span></a>
+        <a href="{{ url_for('audit') }}" class="nav-link {% if active == 'audit' %}active{% endif %}">Audit</a>
       </nav>
       <div class="sidebar-footer">
         Data: GitHub API<br>
         Updated: Weekly<br>
         Repos tracked: 500+ stars
+        <div class="sidebar-secondary-links">
+          <a class="ops-link" href="{{ url_for('tool_detail') }}">tools</a>
+          <a class="ops-link" href="{{ url_for('health_page') }}">health</a>
+          <a class="ops-link" href="{{ url_for('radar') }}">radar</a>
+          <a class="ops-link" href="{{ url_for('memo') }}">briefs</a>
+        </div>
         <a class="ops-link" href="{{ url_for('ops') }}">ops</a>
       </div>
     </aside>
@@ -41,21 +48,21 @@
       <span class="mobile-tab-icon">🏠</span>
       <span class="mobile-tab-label">Home</span>
     </a>
-    <a href="{{ url_for('tool_detail') }}" class="mobile-tab {% if request.path == '/tool' %}active{% endif %}">
-      <span class="mobile-tab-icon">🔍</span>
-      <span class="mobile-tab-label">Tools</span>
+    <a href="{{ url_for('find') }}" class="mobile-tab {% if active == 'find' %}active{% endif %}">
+      <span class="mobile-tab-icon">⌕</span>
+      <span class="mobile-tab-label">Find</span>
     </a>
-    <a href="{{ url_for('category_view') }}" class="mobile-tab {% if request.path == '/category' %}active{% endif %}">
-      <span class="mobile-tab-icon">📦</span>
-      <span class="mobile-tab-label">Categories</span>
+    <a href="{{ url_for('market') }}" class="mobile-tab {% if active == 'market' %}active{% endif %}">
+      <span class="mobile-tab-icon">📈</span>
+      <span class="mobile-tab-label">Markets</span>
     </a>
-    <a href="{{ url_for('health_page') }}" class="mobile-tab {% if request.path == '/health' %}active{% endif %}" aria-label="Health">
-      <span class="mobile-tab-icon">🏥</span>
-      <span class="mobile-tab-label">Health</span>
+    <a href="{{ url_for('alternatives_index') }}" class="mobile-tab {% if active == 'alternatives' %}active{% endif %}">
+      <span class="mobile-tab-icon">🔄</span>
+      <span class="mobile-tab-label">Alts</span>
     </a>
-    <a href="{{ url_for('radar') }}" class="mobile-tab {% if request.path == '/radar' %}active{% endif %}">
-      <span class="mobile-tab-icon">🔭</span>
-      <span class="mobile-tab-label">Radar</span>
+    <a href="{{ url_for('mcp_directory') }}" class="mobile-tab {% if active == 'mcp' %}active{% endif %}">
+      <span class="mobile-tab-icon">🤖</span>
+      <span class="mobile-tab-label">MCP</span>
     </a>
   </nav>
   <script>

@@ -19,6 +19,19 @@ except ModuleNotFoundError:
 BASE_URL = "https://api.github.com/search/code"
 PER_PAGE = 100
 MAX_PAGES = int(os.getenv("SEARCH_MAX_PAGES", "10"))
+MCP_CONFIG_FILES = [
+    ".cursor/mcp.json",
+    "claude_desktop_config.json",
+    ".mcp/config.json",
+    "mcp.json",
+    ".claude/mcp.json",
+]
+MCP_PACKAGE_PATTERNS = [
+    r'"command"\s*:\s*"npx".*?"args"\s*:\s*\[.*?"-y",\s*"([^"]+)"',
+    r'"command"\s*:\s*"node".*?"module"\s*:\s*"([^"]+)"',
+    r'"command"\s*:\s*"python".*?"args"\s*:\s*\[.*?"-m",\s*"([^"]+)"',
+    r'"command"\s*:\s*"uvx".*?"args"\s*:\s*\[.*?"([^"]+)"',
+]
 
 
 def compute_emergence_score(total_repos: int, new_repos_90d: int, active_repos: int) -> float:
@@ -221,6 +234,116 @@ def _search_query_pages(conn, canonical_name: str, term: str, manifest: str) -> 
     return total_found, used_cache, made_api_call
 
 
+def _repo_metadata(repo_full_name: str) -> dict[str, Any] | None:
+    owner, repo = repo_full_name.split("/", 1)
+    payload, _, _ = _api_get(
+        f"https://api.github.com/repos/{owner}/{repo}",
+        {},
+        f"repo_meta:{repo_full_name}",
+        ttl_hours=72,
+    )
+    return payload if isinstance(payload, dict) else None
+
+
+def _upsert_repo_usage(conn, canonical_name: str, repo_full_name: str) -> int:
+    repo_meta = _repo_metadata(repo_full_name) or {}
+    stars = int(repo_meta.get("stargazers_count") or 0)
+    pushed_at = repo_meta.get("pushed_at")
+    created_at = repo_meta.get("created_at")
+    cur = conn.execute(
+        """
+        INSERT OR IGNORE INTO tool_repos (
+            canonical_name, repo_full_name, stars, pushed_at, created_at, dep_type
+        ) VALUES (?, ?, ?, ?, ?, 'runtime')
+        """,
+        (canonical_name, repo_full_name, stars, pushed_at, created_at),
+    )
+    return int(cur.rowcount or 0)
+
+
+def scan_mcp_configs(repo_full_name: str, token: str) -> list[tuple[str, str]]:
+    import base64
+
+    owner, repo = repo_full_name.split("/", 1)
+    found_packages: list[tuple[str, str]] = []
+
+    for config_file in MCP_CONFIG_FILES:
+        cache_key = f"mcp_config:{repo_full_name}:{config_file}"
+        cached = cache_get(cache_key, ttl_hours=72)
+        if cached is not None:
+            content = str(cached or "")
+        else:
+            url = f"https://api.github.com/repos/{owner}/{repo}/contents/{config_file}"
+            headers = {
+                "Authorization": f"token {token}",
+                "Accept": "application/vnd.github.v3+json",
+                "User-Agent": "under-the-hood",
+            }
+            try:
+                response = requests.get(url, headers=headers, timeout=10)
+                _respect_rate_limit(response.headers)
+                if response.status_code == 404:
+                    cache_set(cache_key, "", ttl_hours=72)
+                    continue
+                if response.status_code != 200:
+                    continue
+                data = response.json()
+                content = base64.b64decode(data.get("content", "")).decode("utf-8", errors="ignore")
+                cache_set(cache_key, content, ttl_hours=72)
+            except Exception:
+                continue
+
+        if not content:
+            continue
+
+        for pattern in MCP_PACKAGE_PATTERNS:
+            try:
+                matches = re.findall(pattern, content, re.DOTALL)
+            except Exception:
+                matches = []
+            for match in matches:
+                pkg = str(match).strip()
+                if pkg.startswith("@") or "/" in pkg:
+                    found_packages.append((pkg, "npm"))
+                elif pkg.startswith("mcp") or "mcp-server" in pkg:
+                    found_packages.append((pkg, "pypi"))
+
+    deduped: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in found_packages:
+        if item not in seen:
+            seen.add(item)
+            deduped.append(item)
+    return deduped
+
+
+def search_mcp_adoption(canonical_name: str) -> list[str]:
+    results: set[str] = set()
+    queries = [
+        f'"{canonical_name}" filename:mcp.json',
+        f'"{canonical_name}" filename:claude_desktop_config.json',
+        f'"{canonical_name}" path:.cursor',
+    ]
+
+    for query in queries:
+        payload, _, _ = _api_get(
+            BASE_URL,
+            {"q": query, "per_page": 100},
+            f"mcp_search:{canonical_name}:{query[:40]}",
+            ttl_hours=24,
+        )
+        if not isinstance(payload, dict):
+            continue
+        for item in payload.get("items") or []:
+            repo = item.get("repository") or {}
+            full_name = repo.get("full_name")
+            if full_name:
+                results.add(full_name)
+        time.sleep(2)
+
+    return sorted(results)
+
+
 def _compute_snapshot(conn, canonical_name: str) -> tuple[int, int, int, float, float]:
     total = conn.execute(
         """
@@ -304,7 +427,7 @@ def main() -> None:
     with get_conn() as conn:
         tools = conn.execute(
             """
-            SELECT canonical_name, display_name, ecosystem
+            SELECT canonical_name, display_name, ecosystem, category
             FROM tools
             ORDER BY canonical_name
             """
@@ -315,6 +438,7 @@ def main() -> None:
             canonical_name = tool["canonical_name"]
             display_name = tool["display_name"]
             ecosystem = tool["ecosystem"]
+            category = tool["category"]
 
             print(f"[ {idx:>2}/{total_tools} ] {display_name} ({ecosystem}) ...")
             if should_skip_tool(canonical_name, conn, force=args.force):
@@ -325,7 +449,17 @@ def main() -> None:
             tool_used_cache = False
             tool_made_api_call = False
 
-            if ecosystem == "npm":
+            if category == "MCP Servers":
+                confirmed = 0
+                for repo_full_name in search_mcp_adoption(canonical_name):
+                    try:
+                        packages = scan_mcp_configs(repo_full_name, GITHUB_TOKEN)
+                    except Exception:
+                        continue
+                    if any(pkg_name == canonical_name for pkg_name, _ in packages):
+                        confirmed += _upsert_repo_usage(conn, canonical_name, repo_full_name)
+                manifest_counts["mcp configs"] = confirmed
+            elif ecosystem == "npm":
                 count, used_cache, made_api_call = _search_query_pages(
                     conn, canonical_name, canonical_name, "package.json"
                 )

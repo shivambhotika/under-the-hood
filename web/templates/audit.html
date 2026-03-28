@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% from "macros.html" import tool_logo %}
+{% block content %}
+<section>
+  <h1>Audit</h1>
+  <p class="subtitle">Production-readiness proof for a single OSS tool.</p>
+  <form method="get" action="{{ url_for('audit') }}" class="selector-form">
+    <label for="tool">Choose a tool</label>
+    <select id="tool" name="tool" onchange="this.form.submit()">
+      {% for item in all_tools %}
+      <option value="{{ item.canonical_name }}" {% if item.canonical_name == tool.canonical_name %}selected{% endif %}>{{ item.display_name }}</option>
+      {% endfor %}
+    </select>
+  </form>
+</section>
+
+<section class="audit-hero card">
+  <div class="audit-hero-top">
+    {{ tool_logo(tool, 44) }}
+    <div>
+      <div class="label">Audit target</div>
+      <h2>{{ tool.display_name }}</h2>
+      <p class="subtitle">{{ tool.description }}</p>
+    </div>
+  </div>
+  {% set alternatives_to = get_alternatives_for_tool(tool.canonical_name) %}
+  {% if alternatives_to %}
+  <div class="also-alternative-to">
+    <span class="aat-label">Open source alternative to:</span>
+    {% for alt in alternatives_to %}
+    <a href="{{ url_for('alternatives_detail', proprietary_slug=alt.proprietary_slug) }}" class="aat-chip">
+      {% if alt.proprietary_website %}
+      <img src="https://img.logo.dev/{{ alt.proprietary_website }}?token={{ LOGO_DEV_TOKEN }}&size=24&format=png"
+           width="14" height="14" onerror="this.style.display='none'" loading="lazy">
+      {% endif %}
+      {{ alt.proprietary_name }}
+    </a>
+    {% endfor %}
+  </div>
+  {% endif %}
+</section>
+
+<section class="cards four">
+  {% for stat in stats %}
+  <article class="card">
+    <div class="label">{{ stat.label }}</div>
+    <div class="value">{{ stat.value }}</div>
+    <div class="sub">{{ stat.sub }}</div>
+  </article>
+  {% endfor %}
+</section>
+
+<section class="audit-section">
+  <h2 class="audit-section-title">Why it matters</h2>
+  <div class="insight-box">
+    <p>{{ insight }}</p>
+  </div>
+</section>
+
+<section class="audit-section">
+  <h2 class="audit-section-title">Production readiness</h2>
+  <div class="cards three">
+    <article class="card">
+      <div class="label">Health tier</div>
+      <div class="value">{{ health.health_tier or "Unknown" }}</div>
+      <div class="sub">{{ health.health_tier_reason or "No health rationale yet." }}</div>
+    </article>
+    <article class="card">
+      <div class="label">Enterprise adoption</div>
+      <div class="value">{{ tool.enterprise_repo_count or 0 }}</div>
+      <div class="sub">Known orgs using this dependency</div>
+    </article>
+    <article class="card">
+      <div class="label">Last release</div>
+      <div class="value">{{ health.last_release_text or "unknown" }}</div>
+      <div class="sub">Recency of maintainer activity</div>
+    </article>
+  </div>
+</section>
+
+{% if companions %}
+<section class="audit-section">
+  <h2 class="audit-section-title">🔗 Often Used With</h2>
+  <p class="audit-section-subtitle">
+    Tools that appear in the same repos as {{ tool.display_name }}.
+    Stack compatibility evidence from {{ tool.total_repos | format_number }} real projects.
+  </p>
+  <div class="companions-grid">
+    {% for c in companions %}
+    <a href="{{ url_for('audit', tool=c.companion) }}" class="companion-card">
+      <div class="cc-name">{{ c.display_name }}</div>
+      <div class="cc-meta">{{ c.category }}</div>
+      <div class="cc-count">{{ c.shared_repo_count }} repos together</div>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% if migration_examples %}
+<section class="audit-section">
+  <h2 class="audit-section-title">Migration evidence</h2>
+  <div class="cards three">
+    {% for example in migration_examples %}
+    <article class="card">
+      <div class="label">Switching from {{ example.from_tool.display_name }}</div>
+      <div class="value">{{ example.count }}</div>
+      <div class="sub">tracked repos also now use {{ tool.display_name }}</div>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+{% endblock %}

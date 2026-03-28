@@ -16,6 +16,7 @@ scripts = [
     ("05_fetch_downloads.py", "Fetching npm and PyPI download counts"),
     ("06_fetch_contributors.py", "Fetching contributor intelligence"),
     ("08_enrich_health.py", "Enriching dependency health data"),
+    ("09_compute_coinstalls.py", "Computing stack compatibility pairs"),
 ]
 
 print("\n🔧 Under The Hood — Data Pipeline")

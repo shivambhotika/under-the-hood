@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block content %}
+<section>
+  <h1>Markets</h1>
+  <p class="subtitle">Which categories are settled, which are consolidating, and which still have room for a breakout winner?</p>
+</section>
+
+<section class="cards three">
+  {% for category in categories %}
+  <article class="card">
+    <div class="label">{{ category.market_phase or "Unknown phase" }}</div>
+    <h3>{{ category.category }}</h3>
+    <p>{{ category.insight_text or "No insight yet." }}</p>
+    <ul class="metric-list">
+      <li>Tools tracked: <strong>{{ "{:,}".format(category.tool_count or 0) }}</strong></li>
+      <li>Top tool: <strong>{{ category.top_tool or "—" }}</strong></li>
+      <li>Fragmentation: <strong>{{ "%.2f"|format(category.fragmentation_index or 0) }}</strong></li>
+    </ul>
+    <a class="memo-inline-link" href="{{ url_for('category_view', name=category.category) }}">Open category →</a>
+  </article>
+  {% endfor %}
+</section>
+{% endblock %}

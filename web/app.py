@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 import time
 from typing import Any
 
@@ -14,18 +15,24 @@ from web.data import (
     generate_comparison_verdict,
     generate_category_memo,
     generate_tool_insight,
+    get_all_proprietary_products,
     get_all_categories,
     get_all_tools,
+    get_alternatives_for_proprietary,
+    get_alternatives_for_tool,
     get_category_share_bars,
     get_category_tools,
     get_health_leaderboard,
     get_latest_snapshot_date,
+    get_mcp_tools,
+    get_migration_evidence,
     get_ops_data,
     get_org_tools,
     get_pre_commercial_signal,
     get_radar_snapshot,
     get_radar_tools,
     get_snapshot_freshness_status,
+    get_stack_companions,
     get_summary_stats,
     get_tool_contributors,
     get_tool_detail,
@@ -273,11 +280,147 @@ def inject_helpers():
         TOOLTIPS=TOOLTIPS,
         latest_snapshot_date=get_latest_snapshot_date(),
         freshness_status=get_snapshot_freshness_status(),
+        summary_stats=get_summary_stats(),
+        LOGO_DEV_TOKEN=os.getenv("LOGO_DEV_TOKEN", ""),
+        get_alternatives_for_tool=get_alternatives_for_tool,
     )
 
 
 def render_empty(page_title: str, active: str = "explore"):
     return render_template("empty.html", page_title=page_title, active=active)
+
+
+@app.route("/find")
+def find():
+    query = request.args.get("q", "").strip().lower()
+    tools = [enrich_tool(tool) for tool in get_all_tools()]
+    if query:
+        tools = [
+            tool
+            for tool in tools
+            if query in str(tool.get("display_name", "")).lower()
+            or query in str(tool.get("canonical_name", "")).lower()
+            or query in str(tool.get("category", "")).lower()
+        ]
+    return render_template(
+        "find.html",
+        page_title="Find",
+        active="find",
+        tools=tools,
+        query=query,
+    )
+
+
+@app.route("/market")
+def market():
+    return render_template(
+        "market.html",
+        page_title="Markets",
+        active="market",
+        categories=build_category_cards(),
+    )
+
+
+@app.route("/audit")
+def audit():
+    if not db_has_data():
+        return render_empty("Audit", "audit")
+
+    all_tools = [enrich_tool(tool) for tool in get_all_tools()]
+    if not all_tools:
+        return render_empty("Audit", "audit")
+
+    selected = request.args.get("tool", "").strip()
+    valid_names = {tool["canonical_name"] for tool in all_tools}
+    if not selected or selected not in valid_names:
+        selected = all_tools[0]["canonical_name"]
+
+    payload = build_tool_detail_payload(selected)
+    if not payload:
+        return render_empty("Audit", "audit")
+
+    companions = get_stack_companions(selected, limit=6)
+    migration_examples = []
+    for item in payload["similar"][:3]:
+        evidence = get_migration_evidence(item["canonical_name"], selected)
+        if evidence["count"] > 0:
+            migration_examples.append(
+                {
+                    "from_tool": item,
+                    "count": evidence["count"],
+                    "repos": evidence["repos"],
+                }
+            )
+
+    return render_template(
+        "audit.html",
+        page_title=f"{payload['tool']['display_name']} Audit",
+        active="audit",
+        all_tools=all_tools,
+        tool=payload["tool"],
+        health=payload["health"],
+        contributors=payload["contributors"],
+        similar=payload["similar"],
+        enterprise_orgs=payload["enterprise_orgs"],
+        pre_commercial_signal=payload["pre_commercial_signal"],
+        insight=payload["insight"],
+        stats=payload["stats"],
+        trend_chart=payload["trend_chart"],
+        version_chart=payload["version_chart"],
+        usage_panels=payload["usage_panels"],
+        trend_reliable=payload["trend_reliable"],
+        version_summary=payload["version_summary"],
+        top_version_pct=payload["top_version_pct"],
+        companions=companions,
+        migration_examples=migration_examples,
+    )
+
+
+@app.route("/alternatives")
+def alternatives_index():
+    products = get_all_proprietary_products()
+    by_category: dict[str, list[dict[str, Any]]] = {}
+    for product in products:
+        by_category.setdefault(str(product.get("proprietary_category") or "Other"), []).append(product)
+    return render_template(
+        "alternatives_index.html",
+        page_title="Alternatives",
+        active="alternatives",
+        products=products,
+        by_category=by_category,
+    )
+
+
+@app.route("/alternatives/<proprietary_slug>")
+def alternatives_detail(proprietary_slug: str):
+    prop_info, tools = get_alternatives_for_proprietary(proprietary_slug)
+    if not prop_info:
+        return render_template("404.html", page_title="Not Found", active="alternatives"), 404
+
+    enriched_tools: list[dict[str, Any]] = []
+    for tool in tools:
+        item = enrich_tool(tool)
+        item["health_badge_class"] = health_badge(item.get("health_tier"))
+        enriched_tools.append(item)
+
+    return render_template(
+        "alternatives_detail.html",
+        page_title=f"Alternatives to {prop_info['proprietary_name']}",
+        active="alternatives",
+        prop=prop_info,
+        tools=enriched_tools,
+        proprietary_slug=proprietary_slug,
+    )
+
+
+@app.route("/mcp")
+def mcp_directory():
+    return render_template(
+        "mcp.html",
+        page_title="MCP Directory",
+        active="mcp",
+        tools=[enrich_tool(tool) for tool in get_mcp_tools()],
+    )
 
 
 def enrich_tool(tool: dict[str, Any]) -> dict[str, Any]:
